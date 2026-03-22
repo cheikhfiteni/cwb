@@ -1,0 +1,8 @@
+# Port specs for cwb worktree isolation.
+# Format: VAR_NAME|base_port  (one per line; blank lines and # comments ignored)
+# cwb allocates a unique port starting at base_port+100 for each worktree.
+#
+# Add entries for every port your compose services expose so each worktree
+# gets its own non-conflicting set.
+API_PORT|8000
+POSTGRES_PORT|5432

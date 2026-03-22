@@ -1,0 +1,10 @@
+# buf.gen.yaml — code generation config for proto/
+# Run via: bash scripts/compile_protos.sh
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/python
+    out: ../api/proto_gen
+  - remote: buf.build/grpc/python
+    out: ../api/proto_gen
+    opt:
+      - grpc_python_out=../api/proto_gen

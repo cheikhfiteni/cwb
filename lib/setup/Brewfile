@@ -1,0 +1,6 @@
+# cwb toolchain dependencies
+# Install with: brew bundle --file scripts/cwb/lib/setup/Brewfile
+
+brew "claude"
+brew "codex"
+brew "ripgrep"

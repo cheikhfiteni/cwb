@@ -1,0 +1,15 @@
+# cwb runtime — worktrees created when running cwb on this repo itself
+.cwb/worktrees/
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Shell / test temp files
+*.tmp
+/tmp/

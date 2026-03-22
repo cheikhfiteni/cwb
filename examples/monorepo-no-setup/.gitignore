@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Local secrets — never commit real credentials
+.env.local
+*.env.local
+
+# Build output
+dist/
+build/

@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package example.v1;
+
+option go_package = "example/v1;examplev1";
+
+// ExampleService is a minimal RPC used to demonstrate proto compilation in cwb.
+service ExampleService {
+  rpc GetItem(GetItemRequest) returns (GetItemResponse);
+  rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
+}
+
+message Item {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+}
+
+message GetItemRequest {
+  string id = 1;
+}
+
+message GetItemResponse {
+  Item item = 1;
+}
+
+message ListItemsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListItemsResponse {
+  repeated Item items = 1;
+  string next_page_token = 2;
+}

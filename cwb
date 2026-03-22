@@ -1,0 +1,547 @@
+# cwb - Claude Worktree Branch
+# Like `claude -w` but branches off your current branch instead of the default branch.
+#
+# Setup: source /path/to/repo/cwb in your shell profile — see scripts/cwb/CWB.md.
+#
+# Usage:
+#   cwb                                           # picker in interactive shells; random branch otherwise
+#   cwb --new                                     # force a new random branch/worktree
+#   cwb fix-auth                                  # named branch/worktree
+#   cwb fix-auth --tmux --yolo -- --model gpt-5   # cwb flags + forwarded CLI flags
+#   cwb fix-auth --copy-volumes=false             # skip docker-compose volume isolation
+#
+# Flags (consumed by cwb, not forwarded to the CLI):
+#   --tmux                  run the CLI in a new tmux session
+#   --no-tmux               override the tmux default for this launch
+#   --yolo                  enable the shared "dangerous permissions" mode for this launch
+#   --no-yolo               override the yolo default for this launch
+#   --copy-volumes=true     prefix docker named volumes with worktree name (default: true)
+#   --copy-volumes=false    skip volume isolation
+#   --no-mcp                disable project MCP servers in this worktree session
+#   --new                   force a new random branch instead of opening the picker
+#   --set-defaults          interactively set shared defaults
+#   --help                  print cwb help and exit
+#   --status                print current cwb configuration
+#   --version               print version and exit
+#
+# Preferences:
+#   ~/.cwb/.cwb-prefs                  personal preferences and shared defaults
+#   <repo>/.cwb/worktrees/             repo-local cwb worktrees
+#
+# Commands:
+#   cwb set-default=claude             use claude as the default CLI (default)
+#   cwb set-default=codex              use codex as the default CLI
+#   cwb cwb-setup [-- <agent args>]     open the repo-setup worktree; pass -- to override default prompt
+#   cwb --set-defaults                 interactively set shared defaults
+
+CWB_VERSION="1.4.0"
+
+_cwb_current_script_path() {
+  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+    printf '%s' "${BASH_SOURCE[0]}"
+    return 0
+  fi
+  if [[ -n "${ZSH_VERSION:-}" ]]; then
+    printf '%s' "${(%):-%N}"
+    return 0
+  fi
+  return 1
+}
+
+if [[ -z "${CWB_SCRIPT_DIR:-}" ]]; then
+  _cwb_script_path="$(_cwb_current_script_path)"
+  CWB_SCRIPT_DIR="$(cd "$(dirname "$_cwb_script_path")" && pwd)"
+fi
+
+# shellcheck source=/dev/null
+source "$CWB_SCRIPT_DIR/lib/cwb-config.sh"
+# shellcheck source=/dev/null
+source "$CWB_SCRIPT_DIR/lib/cwb-status.sh"
+
+_cwb_session_alive() {
+  local lockfile="$1"
+  [[ -f "$lockfile" ]] || return 1
+  local lock_type lock_id
+  IFS=: read -r lock_type lock_id < "$lockfile"
+  case "$lock_type" in
+    tmux) tmux has-session -t "$lock_id" 2>/dev/null ;;
+    pid)  kill -0 "$lock_id" 2>/dev/null ;;
+    *)    return 1 ;;
+  esac
+}
+
+_cwb_prune_merged() {
+  local repo_root
+  repo_root="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)" || return 1
+
+  # Determine the merge target branch. Defaults to main; override via env var.
+  local merge_target="${CWB_MERGE_TARGET_BRANCH:-main}"
+
+  # Fetch the merge target to check for merged branches (suppress output to avoid noise)
+  git fetch origin "$merge_target" --quiet 2>/dev/null || return 0
+
+  # Find and clean up cwb branches that have been merged into the merge target
+  local branch wt_name wt_path legacy_path
+  for branch in $(git for-each-ref --format='%(refname:short)' refs/heads/cwb/ 2>/dev/null); do
+    if git merge-base --is-ancestor "$branch" "origin/$merge_target" 2>/dev/null; then
+      wt_name="${branch#cwb/}"
+      wt_path="$(_cwb_default_worktree_path "$repo_root" "$wt_name")"
+      legacy_path="$(_cwb_legacy_worktree_path "$repo_root" "$wt_name")"
+
+      # Skip worktrees with an active session
+      if _cwb_session_alive "$wt_path/.cwb.lock"; then
+        echo "[cwb] Skipping $branch — session still active"
+        continue
+      fi
+      if _cwb_session_alive "$legacy_path/.cwb.lock"; then
+        echo "[cwb] Skipping $branch — legacy session still active"
+        continue
+      fi
+
+      if [[ -d "$wt_path" ]]; then
+        echo "[cwb] Branch $branch merged into $merge_target — cleaning up worktree"
+        git worktree remove --force "$wt_path" 2>/dev/null
+      fi
+      if [[ -d "$legacy_path" ]]; then
+        echo "[cwb] Branch $branch merged into $merge_target — cleaning up legacy worktree"
+        git worktree remove --force "$legacy_path" 2>/dev/null
+      fi
+      echo "[cwb] Removing merged branch $branch"
+      git branch -D "$branch" 2>/dev/null
+    fi
+  done
+}
+
+_cwb_generate_name() {
+  local _adjs=(swift calm bold dark warm cool sharp misty dusty bright rocky
+    quiet gentle fierce sleek amber ivory golden silver hollow crisp lunar tidal
+    breezy frosty sunny)
+  local _nouns=(river stone forge creek flame vale ridge peak bloom drift
+    grove marsh inlet harbor canyon summit basin meadow delta shore cliff
+    tower beacon anchor ember lantern)
+  # zsh uses 1-indexed arrays; bash uses 0-indexed
+  local _base=1; [[ -z "${ZSH_VERSION:-}" ]] && _base=0
+  local w1="${_adjs[$(( RANDOM % ${#_adjs[@]} + _base ))]}"
+  local w2="${_nouns[$(( RANDOM % ${#_nouns[@]} + _base ))]}"
+  local w3="${_nouns[$(( RANDOM % ${#_nouns[@]} + _base ))]}"
+  printf '%s' "${w1}-${w2}-${w3}"
+}
+
+_cwb_confirm() {
+  local prompt="$1"
+  local response
+  if [[ ! -t 0 ]]; then
+    return 1
+  fi
+  read -r -p "$prompt [y/N]: " response
+  [[ "$response" =~ ^([yY]|[yY][eE][sS])$ ]]
+}
+
+_cwb_color() {
+  local color="$1"
+  local text="$2"
+  if [[ -t 1 ]]; then
+    printf '\033[%sm%s\033[0m' "$color" "$text"
+  else
+    printf '%s' "$text"
+  fi
+}
+
+_cwb_pick_name() {
+  local default_name
+  default_name="$(_cwb_generate_name)"
+
+  if [[ -z "${CWB_TEST_INTERACTIVE:-}" ]] && [[ ! -t 0 ]]; then
+    printf '%s' "$default_name"
+    return 0
+  fi
+
+  local create_new_label="[new] create random branch ($default_name)"
+  local create_new_display
+  create_new_display="$(_cwb_color "34" "$create_new_label")"
+
+  local worktree_names=()
+  local branch_names=()
+  local selected_names=("__new__")
+  local line
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && worktree_names+=("$line")
+  done < <(git worktree list --porcelain 2>/dev/null | sed -n 's/^branch refs\/heads\/cwb\///p' | sort -u)
+
+  local worktree_names_text
+  worktree_names_text="$(printf '%s\n' "${worktree_names[@]}")"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if ! grep -Fx "$line" <<< "$worktree_names_text" >/dev/null; then
+      branch_names+=("$line")
+    fi
+  done < <(git for-each-ref --format='%(refname:short)' refs/heads/cwb/ 2>/dev/null | sed 's#^cwb/##' | sort -u)
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if ! grep -Fx "$line" <<< "$worktree_names_text" >/dev/null; then
+      if ! printf '%s\n' "${branch_names[@]}" | grep -Fx "$line" >/dev/null; then
+        branch_names+=("$line")
+      fi
+    fi
+  done < <(git for-each-ref --format='%(refname:short)' refs/remotes/origin/cwb/ 2>/dev/null | sed 's#^origin/cwb/##' | sort -u)
+
+  echo "[cwb] Select a branch target:" >&2
+  local idx=1
+  local array_base=1; [[ -z "${ZSH_VERSION:-}" ]] && array_base=0
+  printf '  %d) %s\n' "$idx" "$create_new_display" >&2
+  idx=$((idx + 1))
+
+  if [[ "${#worktree_names[@]}" -gt 0 ]]; then
+    echo "  $(_cwb_color "32" "Worktrees")" >&2
+    for line in "${worktree_names[@]}"; do
+      printf '  %d) %s\n' "$idx" "$(_cwb_color "32" "$line")" >&2
+      selected_names+=("$line")
+      idx=$((idx + 1))
+    done
+  fi
+
+  if [[ "${#branch_names[@]}" -gt 0 ]]; then
+    echo "  $(_cwb_color "33" "Branches (not in worktrees)")" >&2
+    for line in "${branch_names[@]}"; do
+      printf '  %d) %s\n' "$idx" "$(_cwb_color "33" "$line")" >&2
+      selected_names+=("$line")
+      idx=$((idx + 1))
+    done
+  fi
+
+  if [[ "${#worktree_names[@]}" -eq 0 && "${#branch_names[@]}" -eq 0 ]]; then
+    echo "[cwb] No existing worktrees or cwb branches found." >&2
+  fi
+  echo "[cwb] Enter for new random branch, number to choose, or type a name." >&2
+
+  local choice chosen_name
+  while true; do
+    printf '[cwb] Selection: ' >&2
+    IFS= read -r choice || return 1
+
+    if [[ -z "$choice" ]]; then
+      printf '%s' "$default_name"
+      return 0
+    fi
+
+    if [[ "$choice" =~ ^[0-9]+$ ]]; then
+      if (( choice >= 1 && choice <= ${#selected_names[@]} )); then
+        chosen_name="${selected_names[$((choice - 1 + array_base))]}"
+        if [[ "$chosen_name" == "__new__" ]]; then
+          printf '%s' "$default_name"
+        else
+          printf '%s' "$chosen_name"
+        fi
+        return 0
+      fi
+      echo "[cwb] Invalid selection: $choice" >&2
+      continue
+    fi
+
+    printf '%s' "$choice"
+    return 0
+  done
+}
+
+_cwb_find_worktree_for_branch() {
+  local branch_name="$1"
+  git worktree list --porcelain 2>/dev/null | awk -v branch="refs/heads/${branch_name}" '
+    $1 == "worktree" { current_worktree = $2; next }
+    $1 == "branch" && $2 == branch { print current_worktree; exit }
+  '
+}
+
+_cwb_maybe_pull_remote() {
+  local worktree_path="$1"
+  local branch_name="$2"
+  if ! git show-ref --verify --quiet "refs/remotes/origin/${branch_name}"; then
+    return 0
+  fi
+  if _cwb_confirm "[cwb] Pull latest from origin/${branch_name} before launching?"; then
+    git -C "$worktree_path" pull --ff-only origin "$branch_name" || {
+      echo "[cwb] Warning: pull failed; continuing with local branch state" >&2
+    }
+  fi
+}
+
+# Disable project-level MCP servers in a worktree without modifying the git index
+# globally. Uses git update-index --skip-worktree so the change is invisible to git
+# in this worktree but is cleaned up automatically when the worktree is removed.
+_cwb_disable_mcp() {
+  local wt="$1"
+
+  # Claude Code: clear .mcp.json so no project MCP servers are registered
+  if [[ -f "$wt/.mcp.json" ]]; then
+    printf '{\n  "mcpServers": {}\n}\n' > "$wt/.mcp.json"
+    git -C "$wt" update-index --skip-worktree .mcp.json 2>/dev/null || true
+    echo "[cwb] MCP disabled in worktree (.mcp.json cleared)"
+  fi
+
+  # Codex: rewrite .codex/config.toml stripping all [mcp_servers.*] sections
+  if [[ -f "$wt/.codex/config.toml" ]]; then
+    local tmp
+    tmp="$(mktemp)"
+    python3 -c "
+import sys, re
+content = open(sys.argv[1]).read()
+# Remove each [mcp_servers.*] table and all its key-value pairs until next section or EOF
+content = re.sub(r'\n\[mcp_servers\.[^\]]+\]\n(?:(?!\[)[^\n]*\n)*', '\n', content)
+# Collapse excess blank lines
+content = re.sub(r'\n{3,}', '\n\n', content)
+sys.stdout.write(content.rstrip() + '\n')
+" "$wt/.codex/config.toml" > "$tmp" && mv "$tmp" "$wt/.codex/config.toml"
+    git -C "$wt" update-index --skip-worktree .codex/config.toml 2>/dev/null || true
+    echo "[cwb] MCP disabled in worktree (.codex/config.toml stripped)"
+  fi
+}
+
+_cwb_build_cli_shell_command() {
+  local cli_name="$1"
+  # NOTE: reads $cli_args from the caller's scope (bash dynamic scoping).
+  printf '%q' "$cli_name"
+  for arg in "${cli_args[@]}"; do
+    printf ' %q' "$arg"
+  done
+}
+
+cwb() {
+  if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]; then
+    _cwb_print_help
+    return 0
+  fi
+
+  if [[ "${1:-}" == "--version" ]]; then
+    echo "cwb $CWB_VERSION"
+    return 0
+  fi
+
+  if [[ "${1:-}" == "--status" ]]; then
+    _cwb_print_status
+    return 0
+  fi
+
+  if [[ "${1:-}" == "--set-defaults" ]]; then
+    _cwb_interactive_set_defaults
+    return $?
+  fi
+
+  # Handle set-default subcommand: cwb set-default=claude | cwb set-default=codex
+  if [[ "${1:-}" == set-default=* ]]; then
+    local new_cli="${1#set-default=}"
+    case "$new_cli" in
+      claude|codex) ;;
+      *) echo "[cwb] Unknown CLI '$new_cli'. Valid options: claude, codex" >&2; return 1 ;;
+    esac
+    _cwb_write_user_pref "USER_DEFAULT_CLI" "$new_cli" || return 1
+    echo "[cwb] Default CLI set to: $new_cli"
+    return 0
+  fi
+
+  local name=""
+  local use_tmux=""
+  local use_yolo=""
+  local copy_volumes="true"
+  local no_mcp=false
+  local cli_args=()
+  local picker_requested=false
+  local force_picker_mode=false
+  local force_new_random=false
+  local reserved_command=""
+  local reserved_prompt_file=""
+
+  # Read the persisted CLI preference (default: claude)
+  local cwb_cli
+  cwb_cli="$(_cwb_read_default_cli)"
+  case "$cwb_cli" in
+    claude|codex) ;;
+    *) echo "[cwb] Unknown CLI '$cwb_cli' in $(_cwb_user_prefs_file) — falling back to claude" >&2; cwb_cli="claude" ;;
+  esac
+
+  # Clean up any previously merged branches before creating a new worktree
+  _cwb_prune_merged
+
+  local repo_root
+  # Use --git-common-dir instead of --show-toplevel so new worktrees are created
+  # as siblings under the main repo root even when cwb is invoked from inside
+  # an existing linked worktree. cd+pwd canonicalises the path since
+  # --git-common-dir may return a relative value (e.g. ".git") from the main repo.
+  repo_root="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)" || return 1
+  use_tmux="$(_cwb_read_shared_flag_default "tmux")"
+  use_yolo="$(_cwb_read_shared_flag_default "yolo")"
+
+  # Passing -- first forces name picker mode; remaining args are parsed normally
+  if [[ "${1:-}" == "--" ]]; then
+    picker_requested=true
+    force_picker_mode=true
+    shift
+  fi
+
+  if ! $force_picker_mode && [[ $# -gt 0 && "$1" != -* ]]; then
+    if _cwb_is_reserved_command "$1"; then
+      reserved_command="$1"
+    fi
+    name="$1"
+    shift
+  else
+    picker_requested=true
+  fi
+
+  # Parse out cwb flags and pass everything else through to the selected CLI.
+  while [[ $# -gt 0 ]]; do
+    local arg="$1"
+    shift
+    if [[ "$arg" == "--" ]]; then
+      cli_args+=("$@")
+      break
+    fi
+    if [[ "$arg" == "--tmux" ]]; then
+      use_tmux="on"
+    elif [[ "$arg" == "--no-tmux" ]]; then
+      use_tmux="off"
+    elif [[ "$arg" == "--yolo" ]]; then
+      use_yolo="on"
+    elif [[ "$arg" == "--no-yolo" ]]; then
+      use_yolo="off"
+    elif [[ "$arg" == --copy-volumes=* ]]; then
+      copy_volumes="${arg#--copy-volumes=}"
+    elif [[ "$arg" == "--no-mcp" ]]; then
+      no_mcp=true
+    elif [[ "$arg" == "--new" ]]; then
+      force_new_random=true
+    else
+      cli_args+=("$arg")
+    fi
+  done
+
+  if $picker_requested && ! $force_new_random; then
+    name="$(_cwb_pick_name)" || return 1
+  elif [[ -z "$name" ]]; then
+    name="$(_cwb_generate_name)"
+  fi
+
+  if [[ -n "$reserved_command" ]]; then
+    reserved_prompt_file="$(_cwb_reserved_command_prompt_file "$repo_root" "$reserved_command")" || {
+      echo "[cwb] Unknown reserved command '$reserved_command'" >&2
+      return 1
+    }
+    if [[ ! -f "$reserved_prompt_file" ]]; then
+      echo "[cwb] Reserved prompt not found: $reserved_prompt_file" >&2
+      return 1
+    fi
+  fi
+
+  local worktree_path
+  worktree_path="$(_cwb_default_worktree_path "$repo_root" "$name")"
+  local branch_name="cwb/$name"
+  local tmux_session="cwb-$name"
+
+  local existing_worktree=false
+  local local_branch_exists=false
+  local remote_branch_exists=false
+  local run_cleanup=false
+  local existing_worktree_path
+  existing_worktree_path="$(_cwb_find_worktree_for_branch "$branch_name")"
+  if [[ -n "$existing_worktree_path" ]]; then
+    existing_worktree=true
+    worktree_path="$existing_worktree_path"
+  fi
+  if git show-ref --verify --quiet "refs/heads/$branch_name"; then
+    local_branch_exists=true
+  fi
+  if git show-ref --verify --quiet "refs/remotes/origin/$branch_name"; then
+    remote_branch_exists=true
+  fi
+
+  if $existing_worktree; then
+    local lockfile_check="$worktree_path/.cwb.lock"
+    if _cwb_session_alive "$lockfile_check"; then
+      echo "[cwb] Error: session already active in $worktree_path" >&2
+      return 1
+    fi
+    echo "[cwb] Reusing existing worktree: $worktree_path (branch: $branch_name)"
+    _cwb_maybe_pull_remote "$worktree_path" "$branch_name"
+  else
+    if [[ -d "$worktree_path" ]]; then
+      echo "[cwb] Error: $worktree_path already exists but is not a registered git worktree." >&2
+      return 1
+    fi
+    mkdir -p "$(dirname "$worktree_path")"
+
+    if $local_branch_exists; then
+      echo "[cwb] Creating worktree from existing local branch: $branch_name"
+      git worktree add "$worktree_path" "$branch_name" || return 1
+      _cwb_maybe_pull_remote "$worktree_path" "$branch_name"
+    elif $remote_branch_exists; then
+      echo "[cwb] Creating local branch from remote and adding worktree: origin/$branch_name"
+      git worktree add --track -b "$branch_name" "$worktree_path" "origin/$branch_name" || return 1
+    else
+      git worktree add "$worktree_path" -b "$branch_name" || return 1
+      run_cleanup=true
+    fi
+
+  fi
+
+  # Set up .env symlinks, .env.local stubs, and docker-compose volume isolation.
+  # Existing worktrees may prompt for overwrite when rerun interactively.
+  local env_script="$repo_root/scripts/cwb/lib/lifecycle/cwb-worktree-env.sh"
+  if [[ -f "$env_script" ]]; then
+    bash "$env_script" "$repo_root" "$worktree_path" "$name" "$copy_volumes" || echo "[cwb] Warning: env setup script failed"
+  fi
+
+  if $no_mcp; then
+    _cwb_disable_mcp "$worktree_path"
+  fi
+
+  # Record initial commit after setup so setup-generated files don't trigger "changes detected"
+  local initial_commit
+  initial_commit="$(git -C "$worktree_path" rev-parse HEAD 2>/dev/null || true)"
+
+  local cleanup_script="$repo_root/scripts/cwb/lib/lifecycle/cwb-cleanup.sh"
+  local lockfile="$worktree_path/.cwb.lock"
+
+  echo "[cwb] Starting $cwb_cli in worktree: $worktree_path (branch: $branch_name)"
+
+  if ! command -v "$cwb_cli" &>/dev/null; then
+    echo "[cwb] Error: '$cwb_cli' not found in PATH. Install it or run: cwb set-default=claude" >&2
+    rm -f "$lockfile" 2>/dev/null
+    return 1
+  fi
+
+  _cwb_apply_shared_flag_defaults "$cwb_cli" "$use_yolo"
+
+  # Inject the reserved command prompt when no explicit CLI args were passed.
+  # A user can override the default prompt by passing args after "--":
+  #   cwb cwb-setup -- "custom instructions"
+  if [[ -n "$reserved_prompt_file" ]] && [[ ${#cli_args[@]} -eq 0 ]]; then
+    cli_args+=("$(cat "$reserved_prompt_file")")
+  fi
+
+  if _cwb_bool_is_true "$use_tmux"; then
+    # Write lockfile before launching tmux — the session name is the stable identifier
+    echo "tmux:$tmux_session" > "$lockfile"
+    local tmpscript
+    tmpscript=$(mktemp /tmp/cwb.XXXXXX)
+    {
+      _cwb_build_cli_shell_command "$cwb_cli"
+      printf '\nrc=$?\n'
+      printf 'rm -f %q\n' "$tmpscript"
+      printf '[ "$rc" -ne 0 ] && { echo; read -rp "[cwb] %s exited $rc — press enter to continue "; echo; }\n' "$cwb_cli"
+      printf 'rm -f %q\n' "$lockfile"
+      if $run_cleanup; then
+        printf 'bash %q %q %q %q %q\n' "$cleanup_script" "$worktree_path" "$initial_commit" "$branch_name" "$repo_root"
+      fi
+    } > "$tmpscript"
+    chmod +x "$tmpscript"
+    tmux new-session -s "$tmux_session" -c "$worktree_path" "bash $(printf '%q' "$tmpscript")"
+  else
+    # Write lockfile with the subshell PID (BASHPID is the subshell's own PID, not the parent's)
+    echo "pid:$BASHPID" > "$lockfile"
+    (cd "$worktree_path" && "$cwb_cli" "${cli_args[@]}")
+    rm -f "$lockfile"
+    if $run_cleanup; then
+      bash "$cleanup_script" "$worktree_path" "$initial_commit" "$branch_name" "$repo_root"
+    fi
+  fi
+}
