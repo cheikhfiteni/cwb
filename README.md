@@ -4,29 +4,46 @@
 
 By default, cwb stores repo-local worktrees under `<repo>/.cwb/worktrees/`. This avoids nesting child worktrees inside another worktree's `.claude/` directory, so removing the parent worktree does not implicitly wipe an active downstream cwb worktree.
 
-## Setup
+## Installation
 
-Source the `cwb` file in your shell profile:
+### Homebrew (recommended)
+
+```bash
+brew tap cheikhfiteni/cwb
+brew install cwb
+```
+
+Then add cwb to your shell profile:
 
 ```bash
 # ~/.zshrc or ~/.bashrc
-source /path/to/cwb/cwb
+source "$(brew --prefix)/opt/cwb/cwb"
 ```
 
 Reload your shell (`source ~/.zshrc`) or open a new terminal.
 
-On macOS, bootstrap the `cwb` toolchain with:
+### Manual
+
+Clone the repo and source the script directly:
 
 ```bash
-bash scripts/cwb/lib/setup/setup-macos.sh
+git clone https://github.com/cheikhfiteni/cwb.git ~/cwb
 ```
 
-The script is idempotent:
-- it downloads the current [`scripts/cwb/lib/setup/Brewfile`](scripts/cwb/lib/setup/Brewfile) from GitHub and runs `brew bundle`
-- it only runs `xcode-select --install` if Command Line Tools are missing
-- it only runs the Flowdeck installer if `flowdeck` is not already on `PATH`
+```bash
+# ~/.zshrc or ~/.bashrc
+source ~/cwb/cwb
+```
 
-Override the Brewfile source with `CWB_BREWFILE_URL=...` if you need to test a different branch or fork.
+### macOS toolchain bootstrap
+
+To install the required CLIs (`claude`, `codex`, `ripgrep`) on macOS:
+
+```bash
+bash lib/setup/setup-macos.sh
+```
+
+The script is idempotent — it only installs what is missing. Override the Brewfile with `CWB_BREWFILE_URL=...` to test a different branch or fork.
 
 ## CLI Selection
 
@@ -75,20 +92,20 @@ Everything after the optional name and cwb-specific flags is forwarded to the se
 
 ## What it does
 
-1. **Prunes merged branches** — removes any `cwb/*` branches already merged into `origin/staging`.
+1. **Prunes merged branches** — removes any `cwb/*` branches already merged into `origin/main`.
 2. **Resolves branch/worktree target**:
    - if a worktree already exists for `cwb/<name>`, reuse it.
    - if local `cwb/<name>` exists, create a worktree from that branch.
    - if only remote `origin/cwb/<name>` exists, create local tracking branch and worktree.
    - otherwise create a new `cwb/<name>` branch and worktree.
 3. **Optionally pulls from remote** for local branches after a `y/N` prompt.
-4. **Sets up the environment** via `scripts/cwb/lib/lifecycle/cwb-worktree-env.sh`:
+4. **Sets up the environment** via `lib/lifecycle/cwb-worktree-env.sh`:
    - Symlinks `.env` files from the main repo into the worktree.
    - Creates `.env.local` stubs for worktree-specific overrides (ports, API URLs), auto-selecting free localhost ports for common `web/` runtimes.
    - Writes `docker-compose.override.yml` + `COMPOSE_PROJECT_NAME` to isolate Docker volumes per worktree.
    - Regenerates Python and iOS proto bindings when the repo provides compile scripts.
 5. **Launches the selected CLI** (Claude Code or Codex) inside the worktree directory.
-6. **Cleans up only newly created empty worktrees** via `scripts/cwb/lib/lifecycle/cwb-cleanup.sh`.
+6. **Cleans up only newly created empty worktrees** via `lib/lifecycle/cwb-cleanup.sh`.
 
 ## Interactive picker
 
@@ -109,18 +126,10 @@ Each worktree gets a `.env.local` stub next to every `.env` symlink. Use it to r
 FASTAPI_PORT=8001
 API_BASE_URL=http://localhost:8001
 PROMPT_SERVICE_PORT=8002
-PROMPT_SERVICE_URL=http://localhost:8002
-MOBILE_BACKEND_PORT=8091
-MOBILE_API_BASE_URL=http://localhost:8091
 GRPC_PORT=50053
-PREVIEW_ATC_GRPC_URL=localhost:50053
-HATCHET_SERVER_PORT=8889
-HATCHET_GRPC_PORT=7078
-EVAL_DASHBOARD_PORT=8502
-EVAL_DASHBOARD_UI_PORT=5174
 ```
 
-Keep the URL values aligned with the port values. In worktrees, `cwb` will try to pick available ports for you on first run. Use `bash scripts/cwb/lib/lifecycle/cwb-compose.sh ...` for Docker Compose commands so the cwb layer exports `.env.local` / `.env.override` before Compose evaluates the file.
+Keep URL values aligned with their port values. Use `bash lib/lifecycle/cwb-compose.sh ...` for Docker Compose commands so the cwb layer exports `.env.local` / `.env.override` before Compose evaluates the file.
 
 `.env.local` is gitignored and never committed. Do not create `.env.local` in the main repo.
 
@@ -138,7 +147,7 @@ This ensures parallel worktrees never share databases or state. Pass `--copy-vol
 
 - **Active worktree with changes:** kept after the CLI exits. Resume with `cd .cwb/worktrees/<name>`.
 - **Clean worktree (no changes):** automatically removed along with its branch.
-- **Merged into staging:** pruned automatically the next time any `cwb` command runs.
+- **Merged into main:** pruned automatically the next time any `cwb` command runs.
 
 ## Testing
 
@@ -149,3 +158,46 @@ bash scripts/test_cwb.sh
 ```
 
 The suite creates temporary git repos/remotes, stubs the CLI binaries (`claude`/`codex`), and verifies worktree/branch resolution behavior end-to-end.
+
+## Releasing (maintainers)
+
+cwb uses [Semantic Versioning](https://semver.org). The version is in `cwb` at `CWB_VERSION="x.y.z"` and must match the formula in the [`cheikhfiteni/homebrew-cwb`](https://github.com/cheikhfiteni/homebrew-cwb) tap.
+
+**Steps to cut a release:**
+
+1. Update `CWB_VERSION` in `cwb`:
+   ```bash
+   # edit cwb and change CWB_VERSION="x.y.z"
+   ```
+
+2. Commit, tag, and push:
+   ```bash
+   git add cwb
+   git commit -m "release: vx.y.z"
+   git tag vx.y.z
+   git push origin main --tags
+   ```
+   GitHub automatically creates a source tarball at:
+   `https://github.com/cheikhfiteni/cwb/archive/refs/tags/vx.y.z.tar.gz`
+
+3. Create a GitHub Release from the tag (via the GitHub UI or `gh release create vx.y.z`).
+
+4. Compute the SHA256 of the tarball:
+   ```bash
+   curl -sL https://github.com/cheikhfiteni/cwb/archive/refs/tags/vx.y.z.tar.gz | shasum -a 256
+   ```
+
+5. Update `Formula/cwb.rb` in the [`cheikhfiteni/homebrew-cwb`](https://github.com/cheikhfiteni/homebrew-cwb) tap repo:
+   ```ruby
+   url "https://github.com/cheikhfiteni/cwb/archive/refs/tags/vx.y.z.tar.gz"
+   sha256 "<output from step 4>"
+   ```
+
+6. Commit and push the tap:
+   ```bash
+   git add Formula/cwb.rb
+   git commit -m "cwb x.y.z"
+   git push
+   ```
+
+Users get the update on the next `brew upgrade`.
