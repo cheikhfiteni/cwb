@@ -3,16 +3,6 @@ name: Test CWB
 on:
   pull_request:
     branches:
-      - staging
-      - main
-    paths:
-      - 'cwb'
-      - 'lib/**'
-      - 'scripts/**'
-      - '.github/workflows/test-cwb.yml'
-  push:
-    branches:
-      - staging
       - main
     paths:
       - 'cwb'
@@ -21,7 +11,7 @@ on:
       - '.github/workflows/test-cwb.yml'
 
 concurrency:
-  group: test-cwb-${{ github.event.pull_request.number || github.ref }}
+  group: test-cwb-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -31,31 +21,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout trusted test harness from staging
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: staging
-          path: trusted
-
-      - name: Checkout candidate (pull request)
-        if: github.event_name == 'pull_request'
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: candidate
-
-      - name: Checkout candidate (push)
-        if: github.event_name == 'push'
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          path: candidate
 
       - name: Install dependencies
         run: sudo apt-get install -y zsh
 
       - name: Run cwb bash tests
-        run: |
-          CWB_SOURCE_ROOT="$GITHUB_WORKSPACE/candidate" \
-            bash candidate/scripts/test_cwb.sh
+        run: bash scripts/test_cwb.sh

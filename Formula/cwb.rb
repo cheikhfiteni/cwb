@@ -1,3 +1,6 @@
+# This file is kept here as a reference. The canonical copy that Homebrew
+# reads lives in the cheikhfiteni/homebrew-tap repo at Formula/cwb.rb.
+# Copy it there (with url + sha256 updated) when cutting a release.
 class Cwb < Formula
   desc "High-level wrapper around coding-agent CLIs using isolated git worktrees"
   homepage "https://github.com/cheikhfiteni/cwb"

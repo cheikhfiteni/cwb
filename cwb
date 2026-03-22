@@ -322,7 +322,7 @@ _cwb_check_for_update() {
     now=$(date +%s)
     mtime=$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null || echo 0)
     age=$(( now - mtime ))
-    if (( age < 86400 )); then
+    if (( age < 14400 )); then
       latest=$(cat "$cache_file" 2>/dev/null || true)
     fi
   fi
@@ -351,7 +351,7 @@ _cwb_check_for_update() {
     local a=$(( ${cur[i]:-0} )) b=$(( ${new[i]:-0} ))
     if (( a < b )); then
       printf '\n[cwb] Update available: v%s → v%s\n' "$CWB_VERSION" "$latest"
-      printf '[cwb] Upgrade: brew upgrade cwb\n'
+      printf '[cwb] Upgrade: brew upgrade cheikhfiteni/tap/cwb\n'
       printf '[cwb] (Set CWB_NO_UPDATE_CHECK=1 to silence this message)\n'
       return 0
     elif (( a > b )); then

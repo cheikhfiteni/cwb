@@ -9,8 +9,8 @@ By default, cwb stores repo-local worktrees under `<repo>/.cwb/worktrees/`. This
 ### Homebrew (recommended)
 
 ```bash
-brew tap cheikhfiteni/cwb https://github.com/cheikhfiteni/cwb
-brew install cwb
+brew tap cheikhfiteni/tap
+brew install cheikhfiteni/tap/cwb
 ```
 
 Then add cwb to your shell profile:
@@ -161,7 +161,7 @@ The suite creates temporary git repos/remotes, stubs the CLI binaries (`claude`/
 
 ## Releasing (maintainers)
 
-cwb uses [Semantic Versioning](https://semver.org). The version lives in `cwb` at `CWB_VERSION="x.y.z"` and must stay in sync with `Formula/cwb.rb` in this repo.
+cwb uses [Semantic Versioning](https://semver.org). The version lives in `cwb` at `CWB_VERSION="x.y.z"`. The Homebrew formula lives in the separate [`cheikhfiteni/homebrew-tap`](https://github.com/cheikhfiteni/homebrew-tap) repo (a generic tap that hosts all `cheikhfiteni` tools).
 
 **Steps to cut a release:**
 
@@ -190,17 +190,18 @@ cwb uses [Semantic Versioning](https://semver.org). The version lives in `cwb` a
    curl -sL https://github.com/cheikhfiteni/cwb/archive/refs/tags/vx.y.z.tar.gz | shasum -a 256
    ```
 
-5. Update `Formula/cwb.rb` in this repo:
+5. Update `Formula/cwb.rb` in the [`cheikhfiteni/homebrew-tap`](https://github.com/cheikhfiteni/homebrew-tap) repo:
    ```ruby
    url "https://github.com/cheikhfiteni/cwb/archive/refs/tags/vx.y.z.tar.gz"
    sha256 "<output from step 4>"
    ```
+   A reference copy is kept at `Formula/cwb.rb` in this repo for convenience.
 
-6. Commit and push:
+6. Commit and push the tap:
    ```bash
    git add Formula/cwb.rb
-   git commit -m "formula: vx.y.z"
+   git commit -m "cwb: vx.y.z"
    git push origin main
    ```
 
-Users get the update on the next `brew upgrade cwb`.
+Users get the update on the next `brew upgrade cheikhfiteni/tap/cwb`.
