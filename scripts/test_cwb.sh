@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_ROOT="${CWB_SOURCE_ROOT:-$ROOT_DIR}"
 TEST_TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_TMP_ROOT"' EXIT
@@ -85,13 +85,11 @@ setup_repo() {
 
   cp "$SOURCE_ROOT/cwb" "$repo_path/cwb"
   chmod +x "$repo_path/cwb"
-  mkdir -p "$repo_path/scripts/cwb" "$repo_path/scripts/cwb/lib" \
-    "$repo_path/scripts/cwb/lib/lifecycle" "$repo_path/scripts/cwb/lib/setup"
-  cp "$SOURCE_ROOT/scripts/cwb/cwb" "$repo_path/scripts/cwb/cwb"
-  chmod +x "$repo_path/scripts/cwb/cwb"
-  cp "$SOURCE_ROOT/scripts/cwb/lib/setup/cwb-repo-setup.md" "$repo_path/scripts/cwb/lib/setup/cwb-repo-setup.md"
-  cp "$SOURCE_ROOT/scripts/cwb/lib/cwb-config.sh" "$repo_path/scripts/cwb/lib/cwb-config.sh"
-  cp "$SOURCE_ROOT/scripts/cwb/lib/cwb-status.sh" "$repo_path/scripts/cwb/lib/cwb-status.sh"
+  mkdir -p "$repo_path/lib" "$repo_path/lib/setup" \
+    "$repo_path/scripts/cwb/lib/lifecycle"
+  cp "$SOURCE_ROOT/lib/setup/cwb-repo-setup.md" "$repo_path/lib/setup/cwb-repo-setup.md"
+  cp "$SOURCE_ROOT/lib/cwb-config.sh" "$repo_path/lib/cwb-config.sh"
+  cp "$SOURCE_ROOT/lib/cwb-status.sh" "$repo_path/lib/cwb-status.sh"
 
   mkdir -p "$repo_path/.cwb/worktrees" "$repo_path/.claude/worktrees" "$repo_path/bin" "$repo_path/home"
 
@@ -174,7 +172,7 @@ TMUX_BIN
 # temp test repo
 README
 
-  git -C "$repo_path" add README.md scripts cwb
+  git -C "$repo_path" add README.md scripts cwb lib
   git -C "$repo_path" commit -m "init" >/dev/null
 
   echo "$repo_path"
@@ -223,7 +221,7 @@ run_env_setup() {
   local copy_volumes="${4:-true}"
   (
     cd "$repo_path"
-    bash "$SOURCE_ROOT/scripts/cwb/lib/lifecycle/cwb-worktree-env.sh" "$repo_path" "$worktree_path" "$worktree_name" "$copy_volumes"
+    bash "$SOURCE_ROOT/lib/lifecycle/cwb-worktree-env.sh" "$repo_path" "$worktree_path" "$worktree_name" "$copy_volumes"
   )
 }
 
@@ -576,7 +574,7 @@ DOCKER_BIN
     cd "$repo_path"
     PATH="$repo_path/bin:$PATH" \
     CWB_TEST_LOG="$repo_path/.test-cli-calls" \
-    bash "$SOURCE_ROOT/scripts/cwb/lib/lifecycle/cwb-compose.sh" -f web/docker-compose.mobile.yaml config >/dev/null
+    bash "$SOURCE_ROOT/lib/lifecycle/cwb-compose.sh" -f web/docker-compose.mobile.yaml config >/dev/null
   )
 
   assert_contains "$repo_path/.test-cli-calls" "FASTAPI_PORT=8013" || return 1

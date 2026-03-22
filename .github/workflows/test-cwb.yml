@@ -7,7 +7,8 @@ on:
       - main
     paths:
       - 'cwb'
-      - 'scripts/cwb/**'
+      - 'lib/**'
+      - 'scripts/**'
       - '.github/workflows/test-cwb.yml'
   push:
     branches:
@@ -15,7 +16,8 @@ on:
       - main
     paths:
       - 'cwb'
-      - 'scripts/cwb/**'
+      - 'lib/**'
+      - 'scripts/**'
       - '.github/workflows/test-cwb.yml'
 
 concurrency:
@@ -56,4 +58,4 @@ jobs:
       - name: Run cwb bash tests
         run: |
           CWB_SOURCE_ROOT="$GITHUB_WORKSPACE/candidate" \
-            bash candidate/scripts/cwb/test_cwb.sh
+            bash candidate/scripts/test_cwb.sh
