@@ -9,7 +9,7 @@ By default, cwb stores repo-local worktrees under `<repo>/.cwb/worktrees/`. This
 ### Homebrew (recommended)
 
 ```bash
-brew tap cheikhfiteni/cwb
+brew tap cheikhfiteni/cwb https://github.com/cheikhfiteni/cwb
 brew install cwb
 ```
 
@@ -161,13 +161,13 @@ The suite creates temporary git repos/remotes, stubs the CLI binaries (`claude`/
 
 ## Releasing (maintainers)
 
-cwb uses [Semantic Versioning](https://semver.org). The version is in `cwb` at `CWB_VERSION="x.y.z"` and must match the formula in the [`cheikhfiteni/homebrew-cwb`](https://github.com/cheikhfiteni/homebrew-cwb) tap.
+cwb uses [Semantic Versioning](https://semver.org). The version lives in `cwb` at `CWB_VERSION="x.y.z"` and must stay in sync with `Formula/cwb.rb` in this repo.
 
 **Steps to cut a release:**
 
 1. Update `CWB_VERSION` in `cwb`:
    ```bash
-   # edit cwb and change CWB_VERSION="x.y.z"
+   # edit cwb: CWB_VERSION="x.y.z"
    ```
 
 2. Commit, tag, and push:
@@ -180,24 +180,27 @@ cwb uses [Semantic Versioning](https://semver.org). The version is in `cwb` at `
    GitHub automatically creates a source tarball at:
    `https://github.com/cheikhfiteni/cwb/archive/refs/tags/vx.y.z.tar.gz`
 
-3. Create a GitHub Release from the tag (via the GitHub UI or `gh release create vx.y.z`).
+3. Create a GitHub Release from the tag:
+   ```bash
+   gh release create vx.y.z --title "vx.y.z" --generate-notes
+   ```
 
 4. Compute the SHA256 of the tarball:
    ```bash
    curl -sL https://github.com/cheikhfiteni/cwb/archive/refs/tags/vx.y.z.tar.gz | shasum -a 256
    ```
 
-5. Update `Formula/cwb.rb` in the [`cheikhfiteni/homebrew-cwb`](https://github.com/cheikhfiteni/homebrew-cwb) tap repo:
+5. Update `Formula/cwb.rb` in this repo:
    ```ruby
    url "https://github.com/cheikhfiteni/cwb/archive/refs/tags/vx.y.z.tar.gz"
    sha256 "<output from step 4>"
    ```
 
-6. Commit and push the tap:
+6. Commit and push:
    ```bash
    git add Formula/cwb.rb
-   git commit -m "cwb x.y.z"
-   git push
+   git commit -m "formula: vx.y.z"
+   git push origin main
    ```
 
-Users get the update on the next `brew upgrade`.
+Users get the update on the next `brew upgrade cwb`.

@@ -306,6 +306,60 @@ _cwb_build_cli_shell_command() {
   done
 }
 
+# Check for a newer cwb release. Writes a one-line upgrade hint to stdout if an
+# update is found; writes nothing if up-to-date or the check cannot complete.
+# Results are cached in ~/.cwb/.version-check for 24 hours so the network is
+# only hit once per day. Set CWB_NO_UPDATE_CHECK=1 to disable entirely.
+_cwb_check_for_update() {
+  [[ -n "${CWB_NO_UPDATE_CHECK:-}" ]] && return 0
+
+  local cache_file="${HOME}/.cwb/.version-check"
+  local latest=""
+
+  # Use cache when fresh (< 24 h)
+  if [[ -f "$cache_file" ]]; then
+    local now mtime age
+    now=$(date +%s)
+    mtime=$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null || echo 0)
+    age=$(( now - mtime ))
+    if (( age < 86400 )); then
+      latest=$(cat "$cache_file" 2>/dev/null || true)
+    fi
+  fi
+
+  # Refresh cache when stale
+  if [[ -z "$latest" ]]; then
+    latest=$(
+      curl -fsSL --max-time 3 \
+        "https://api.github.com/repos/cheikhfiteni/cwb/releases/latest" 2>/dev/null |
+      sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v*\([0-9][^"]*\)".*/\1/p' | head -1
+    )
+    if [[ -n "$latest" ]]; then
+      mkdir -p "${HOME}/.cwb"
+      printf '%s\n' "$latest" > "$cache_file"
+    fi
+  fi
+
+  [[ -z "$latest" || "$latest" == "$CWB_VERSION" ]] && return 0
+
+  # Pure-bash version comparison (works without sort -V or python)
+  local -a cur new
+  IFS='.' read -ra cur <<< "$CWB_VERSION"
+  IFS='.' read -ra new <<< "$latest"
+  local i
+  for (( i=0; i < ${#cur[@]} || i < ${#new[@]}; i++ )); do
+    local a=$(( ${cur[i]:-0} )) b=$(( ${new[i]:-0} ))
+    if (( a < b )); then
+      printf '\n[cwb] Update available: v%s → v%s\n' "$CWB_VERSION" "$latest"
+      printf '[cwb] Upgrade: brew upgrade cwb\n'
+      printf '[cwb] (Set CWB_NO_UPDATE_CHECK=1 to silence this message)\n'
+      return 0
+    elif (( a > b )); then
+      return 0
+    fi
+  done
+}
+
 cwb() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]; then
     _cwb_print_help
@@ -518,6 +572,13 @@ cwb() {
     cli_args+=("$(cat "$reserved_prompt_file")")
   fi
 
+  # Run update check in the background so it overlaps with the CLI session
+  # rather than adding latency after it exits.
+  local _cwb_upd_tmp
+  _cwb_upd_tmp=$(mktemp)
+  ( _cwb_check_for_update > "$_cwb_upd_tmp" 2>&1 ) &
+  local _cwb_upd_pid=$!
+
   if _cwb_bool_is_true "$use_tmux"; then
     # Write lockfile before launching tmux — the session name is the stable identifier
     echo "tmux:$tmux_session" > "$lockfile"
@@ -544,4 +605,11 @@ cwb() {
       bash "$cleanup_script" "$worktree_path" "$initial_commit" "$branch_name" "$repo_root"
     fi
   fi
+
+  # Display update notification (if any) once the session is over
+  wait "$_cwb_upd_pid" 2>/dev/null || true
+  if [[ -s "$_cwb_upd_tmp" ]]; then
+    cat "$_cwb_upd_tmp" >&2
+  fi
+  rm -f "$_cwb_upd_tmp"
 }
