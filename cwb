@@ -34,7 +34,7 @@
 #   cwb cwb-setup [-- <agent args>]     open the repo-setup worktree; pass -- to override default prompt
 #   cwb --set-defaults                 interactively set shared defaults
 
-CWB_VERSION="1.4.0"
+CWB_VERSION="1.4.1"
 
 if [[ -z "${CWB_SCRIPT_DIR:-}" ]]; then
   # Must be resolved at the top level of this file (not inside a function or

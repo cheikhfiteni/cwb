@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_ROOT="${CWB_SOURCE_ROOT:-$ROOT_DIR}"
+CURRENT_VERSION="$(sed -n 's/^CWB_VERSION=\"\(.*\)\"$/\1/p' "$SOURCE_ROOT/cwb" | head -n 1)"
 TEST_TMP_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_TMP_ROOT"' EXIT
 
@@ -403,7 +404,7 @@ test_status_prints_version_and_preferences() {
   output="$(run_cwb "$repo_path" --status)"
 
   [[ "$output" == *"cwb status"* ]] || fail "Expected status header in output" || return 1
-  [[ "$output" == *"Version: 1.4.0"* ]] || fail "Expected version in status output" || return 1
+  [[ "$output" == *"Version: $CURRENT_VERSION"* ]] || fail "Expected version in status output" || return 1
   [[ "$output" == *"Preferences file: $repo_path/home/.cwb/.cwb-prefs"* ]] || fail "Expected prefs path in status output" || return 1
   [[ "$output" == *"Default CLI: codex"* ]] || fail "Expected default CLI in status output" || return 1
   [[ "$output" == *"Shared default [tmux]: off"* ]] || fail "Expected tmux shared default in status output" || return 1
@@ -454,7 +455,7 @@ test_zsh_source_wrapper_loads_help_helpers() {
   local output
   output="$(cd "$repo_path" && HOME="$repo_path/home" zsh -lc '. ./cwb && cwb --help | sed -n "1,6p"')"
 
-  [[ "$output" == *"cwb 1.4.0"* ]] || fail "Expected cwb version in zsh-sourced help output" || return 1
+  [[ "$output" == *"cwb $CURRENT_VERSION"* ]] || fail "Expected cwb version in zsh-sourced help output" || return 1
   [[ "$output" == *"High-level wrapper around coding-agent CLIs"* ]] || fail "Expected help summary in zsh-sourced help output" || return 1
 }
 
