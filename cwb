@@ -36,21 +36,16 @@
 
 CWB_VERSION="1.4.0"
 
-_cwb_current_script_path() {
-  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
-    printf '%s' "${BASH_SOURCE[0]}"
-    return 0
-  fi
-  if [[ -n "${ZSH_VERSION:-}" ]]; then
-    printf '%s' "${(%):-%N}"
-    return 0
-  fi
-  return 1
-}
-
 if [[ -z "${CWB_SCRIPT_DIR:-}" ]]; then
-  _cwb_script_path="$(_cwb_current_script_path)"
-  CWB_SCRIPT_DIR="$(cd "$(dirname "$_cwb_script_path")" && pwd)"
+  # Must be resolved at the top level of this file (not inside a function or
+  # subshell) so that $0 and BASH_SOURCE reflect the sourced file path.
+  # bash: BASH_SOURCE[0] is the sourced file.
+  # zsh:  BASH_SOURCE is unset; $0 at top level is the sourced file.
+  if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+    CWB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  else
+    CWB_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  fi
 fi
 
 # shellcheck source=/dev/null
