@@ -459,6 +459,23 @@ test_zsh_source_wrapper_loads_help_helpers() {
   [[ "$output" == *"High-level wrapper around coding-agent CLIs"* ]] || fail "Expected help summary in zsh-sourced help output" || return 1
 }
 
+test_zshrc_source_uses_sourced_file_dir() {
+  local repo_path
+  repo_path="$(setup_repo "zshrc-source-wrapper")"
+  local outside_dir="$TEST_TMP_ROOT/outside-zshrc-source-wrapper"
+  mkdir -p "$outside_dir"
+
+  cat > "$repo_path/home/.zshrc" <<EOF
+source "$repo_path/cwb"
+EOF
+
+  local output
+  output="$(cd "$outside_dir" && HOME="$repo_path/home" zsh -lc 'source ~/.zshrc; cwb --status')"
+
+  [[ "$output" == *"cwb status"* ]] || fail "Expected status header after sourcing from ~/.zshrc in zsh" || return 1
+  [[ "$output" == *"Version: $CURRENT_VERSION"* ]] || fail "Expected version after sourcing from ~/.zshrc in zsh" || return 1
+}
+
 test_new_flag_creates_random_worktree_non_interactively() {
   local repo_path
   repo_path="$(setup_repo "new-flag")"
@@ -598,6 +615,7 @@ run_test test_help_is_non_interactive_and_does_not_launch_cli
 run_test test_reserved_cwb_setup_uses_repo_setup_prompt
 run_test test_reserved_cwb_setup_keeps_passthrough_args
 run_test test_zsh_source_wrapper_loads_help_helpers
+run_test test_zshrc_source_uses_sourced_file_dir
 run_test test_new_flag_creates_random_worktree_non_interactively
 run_test test_env_setup_sanitizes_nested_worktree_name_for_compose
 run_test test_env_setup_generates_worktree_port_overrides
