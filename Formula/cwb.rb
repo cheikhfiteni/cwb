@@ -8,6 +8,8 @@ class Cwb < Formula
   sha256 "PLACEHOLDER_RUN_curl_sL_URL_shasum_a_256"
   license "MIT"
 
+  head "https://github.com/cheikhfiteni/cwb.git", branch: "main"
+
   def install
     prefix.install "cwb", "lib"
   end
