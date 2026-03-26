@@ -105,7 +105,7 @@ _cwb_is_shared_flag() {
 }
 
 _cwb_supported_agents() {
-  printf '%s\n' codex claude
+  printf '%s\n' codex claude agent
 }
 
 _cwb_reserved_commands() {
@@ -139,9 +139,10 @@ _cwb_shared_flag_equivalent_cwb_flag() {
 _cwb_shared_flag_agent_mapping() {
   local flag_name="$1" agent_name="$2"
   case "$flag_name:$agent_name" in
-    tmux:codex|tmux:claude) printf '%s' 'launch inside a tmux session' ;;
+    tmux:codex|tmux:claude|tmux:agent) printf '%s' 'launch inside a tmux session' ;;
     yolo:codex) printf '%s' '--yolo' ;;
     yolo:claude) printf '%s' '--dangerously-skip-permissions' ;;
+    yolo:agent) printf '%s' '--yolo' ;;
     *) return 1 ;;
   esac
 }
@@ -173,6 +174,7 @@ _cwb_append_shared_cli_flag() {
       case "$cwb_cli" in
         codex) cli_args+=("--yolo") ;;
         claude) cli_args+=("--dangerously-skip-permissions") ;;
+        agent) cli_args+=("--yolo") ;;
       esac
       ;;
     *) return 1 ;;

@@ -1,0 +1,38 @@
+name: Release CWB
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: release-cwb-main
+  cancel-in-progress: false
+
+jobs:
+  release-cwb:
+    name: release-cwb
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y zsh gh
+
+      - name: Run cwb bash tests
+        run: bash scripts/test_cwb.sh
+
+      - name: Release from main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_PUSH_TOKEN: ${{ secrets.HOMEBREW_TAP_PUSH_TOKEN }}
+          HOMEBREW_TAP_REPO: cheikhfiteni/homebrew-tap
+        run: bash scripts/release_on_main.sh

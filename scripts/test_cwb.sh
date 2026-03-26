@@ -130,6 +130,13 @@ echo "codex|$PWD|$*" >> "${CWB_TEST_LOG:?missing CWB_TEST_LOG}"
 CODEX_BIN
   chmod +x "$repo_path/bin/codex"
 
+  cat > "$repo_path/bin/agent" <<'AGENT_BIN'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "agent|$PWD|$*" >> "${CWB_TEST_LOG:?missing CWB_TEST_LOG}"
+AGENT_BIN
+  chmod +x "$repo_path/bin/agent"
+
   cat > "$repo_path/bin/tmux" <<'TMUX_BIN'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -459,6 +466,23 @@ test_zsh_source_wrapper_loads_help_helpers() {
   [[ "$output" == *"High-level wrapper around coding-agent CLIs"* ]] || fail "Expected help summary in zsh-sourced help output" || return 1
 }
 
+test_zshrc_source_uses_sourced_file_dir() {
+  local repo_path
+  repo_path="$(setup_repo "zshrc-source-wrapper")"
+  local outside_dir="$TEST_TMP_ROOT/outside-zshrc-source-wrapper"
+  mkdir -p "$outside_dir"
+
+  cat > "$repo_path/home/.zshrc" <<EOF
+source "$repo_path/cwb"
+EOF
+
+  local output
+  output="$(cd "$outside_dir" && HOME="$repo_path/home" zsh -lc 'source ~/.zshrc; cwb --status')"
+
+  [[ "$output" == *"cwb status"* ]] || fail "Expected status header after sourcing from ~/.zshrc in zsh" || return 1
+  [[ "$output" == *"Version: $CURRENT_VERSION"* ]] || fail "Expected version after sourcing from ~/.zshrc in zsh" || return 1
+}
+
 test_new_flag_creates_random_worktree_non_interactively() {
   local repo_path
   repo_path="$(setup_repo "new-flag")"
@@ -583,6 +607,30 @@ DOCKER_BIN
   assert_contains "$repo_path/.test-cli-calls" "docker|compose -f web/docker-compose.mobile.yaml config" || return 1
 }
 
+test_set_default_agent_persists_and_launches_agent() {
+  local repo_path
+  repo_path="$(setup_repo "agent-default")"
+
+  run_cwb "$repo_path" set-default=agent >/dev/null
+
+  assert_contains "$repo_path/home/.cwb/.cwb-prefs" "USER_DEFAULT_CLI=agent" || return 1
+
+  run_cwb "$repo_path" alpha >/dev/null
+
+  assert_contains "$repo_path/.test-cli-calls" "agent|" || return 1
+}
+
+test_yolo_maps_to_agent_flag() {
+  local repo_path
+  repo_path="$(setup_repo "agent-yolo")"
+
+  run_cwb "$repo_path" set-default=agent >/dev/null
+  run_cwb "$repo_path" alpha --yolo >/dev/null
+
+  assert_contains "$repo_path/.test-cli-calls" "agent|" || return 1
+  assert_contains "$repo_path/.test-cli-calls" "--yolo" || return 1
+}
+
 run_test test_new_branch_creates_worktree_and_runs_cleanup
 run_test test_existing_local_branch_skips_cleanup
 run_test test_remote_only_branch_creates_tracking_worktree
@@ -598,9 +646,12 @@ run_test test_help_is_non_interactive_and_does_not_launch_cli
 run_test test_reserved_cwb_setup_uses_repo_setup_prompt
 run_test test_reserved_cwb_setup_keeps_passthrough_args
 run_test test_zsh_source_wrapper_loads_help_helpers
+run_test test_zshrc_source_uses_sourced_file_dir
 run_test test_new_flag_creates_random_worktree_non_interactively
 run_test test_env_setup_sanitizes_nested_worktree_name_for_compose
 run_test test_env_setup_generates_worktree_port_overrides
+run_test test_set_default_agent_persists_and_launches_agent
+run_test test_yolo_maps_to_agent_flag
 run_test test_cwb_compose_exports_env_local_overrides
 
 echo "[RESULT] Passed: $pass_count, Failed: $fail_count"

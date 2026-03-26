@@ -31,6 +31,7 @@
 # Commands:
 #   cwb set-default=claude             use claude as the default CLI (default)
 #   cwb set-default=codex              use codex as the default CLI
+#   cwb set-default=agent              use cursor agent as the default CLI
 #   cwb cwb-setup [-- <agent args>]     open the repo-setup worktree; pass -- to override default prompt
 #   cwb --set-defaults                 interactively set shared defaults
 
@@ -40,9 +41,17 @@ if [[ -z "${CWB_SCRIPT_DIR:-}" ]]; then
   # Must be resolved at the top level of this file (not inside a function or
   # subshell) so that $0 and BASH_SOURCE reflect the sourced file path.
   # bash: BASH_SOURCE[0] is the sourced file.
-  # zsh:  BASH_SOURCE is unset; $0 at top level is the sourced file.
+  # zsh:  use %x to get the current sourced file; $0 points at the shell name
+  #       when cwb is loaded indirectly via a shell profile.
+  local_cwb_source_path=""
   if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
-    CWB_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local_cwb_source_path="${BASH_SOURCE[0]}"
+  elif [[ -n "${ZSH_VERSION:-}" ]]; then
+    local_cwb_source_path="${(%):-%x}"
+  fi
+
+  if [[ -n "$local_cwb_source_path" ]]; then
+    CWB_SCRIPT_DIR="$(cd "$(dirname "$local_cwb_source_path")" && pwd)"
   else
     CWB_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
   fi
@@ -380,8 +389,8 @@ cwb() {
   if [[ "${1:-}" == set-default=* ]]; then
     local new_cli="${1#set-default=}"
     case "$new_cli" in
-      claude|codex) ;;
-      *) echo "[cwb] Unknown CLI '$new_cli'. Valid options: claude, codex" >&2; return 1 ;;
+      claude|codex|agent) ;;
+      *) echo "[cwb] Unknown CLI '$new_cli'. Valid options: claude, codex, agent" >&2; return 1 ;;
     esac
     _cwb_write_user_pref "USER_DEFAULT_CLI" "$new_cli" || return 1
     echo "[cwb] Default CLI set to: $new_cli"
@@ -404,7 +413,7 @@ cwb() {
   local cwb_cli
   cwb_cli="$(_cwb_read_default_cli)"
   case "$cwb_cli" in
-    claude|codex) ;;
+    claude|codex|agent) ;;
     *) echo "[cwb] Unknown CLI '$cwb_cli' in $(_cwb_user_prefs_file) — falling back to claude" >&2; cwb_cli="claude" ;;
   esac
 
