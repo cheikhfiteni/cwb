@@ -10,7 +10,7 @@ Usage:
   cwb --new [cwb flags] [-- <agent args...>]
   cwb <name> [cwb flags] [-- <agent args...>]
   cwb cwb-setup [-- <agent args>]
-  cwb set-default=<claude|codex>
+  cwb set-default=<claude|codex|agent>
   cwb --set-defaults
   cwb --status
   cwb --help
@@ -49,9 +49,11 @@ Shared flag mapping:
   yolo -> cwb flag: --yolo
     codex: --yolo
     claude: --dangerously-skip-permissions
+    agent: --yolo
   tmux -> cwb flag: --tmux
     codex: launch inside a tmux session
     claude: launch inside a tmux session
+    agent: launch inside a tmux session
 
 Examples:
   cwb

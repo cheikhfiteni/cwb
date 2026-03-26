@@ -130,6 +130,13 @@ echo "codex|$PWD|$*" >> "${CWB_TEST_LOG:?missing CWB_TEST_LOG}"
 CODEX_BIN
   chmod +x "$repo_path/bin/codex"
 
+  cat > "$repo_path/bin/agent" <<'AGENT_BIN'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "agent|$PWD|$*" >> "${CWB_TEST_LOG:?missing CWB_TEST_LOG}"
+AGENT_BIN
+  chmod +x "$repo_path/bin/agent"
+
   cat > "$repo_path/bin/tmux" <<'TMUX_BIN'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -600,6 +607,30 @@ DOCKER_BIN
   assert_contains "$repo_path/.test-cli-calls" "docker|compose -f web/docker-compose.mobile.yaml config" || return 1
 }
 
+test_set_default_agent_persists_and_launches_agent() {
+  local repo_path
+  repo_path="$(setup_repo "agent-default")"
+
+  run_cwb "$repo_path" set-default=agent >/dev/null
+
+  assert_contains "$repo_path/home/.cwb/.cwb-prefs" "USER_DEFAULT_CLI=agent" || return 1
+
+  run_cwb "$repo_path" alpha >/dev/null
+
+  assert_contains "$repo_path/.test-cli-calls" "agent|" || return 1
+}
+
+test_yolo_maps_to_agent_flag() {
+  local repo_path
+  repo_path="$(setup_repo "agent-yolo")"
+
+  run_cwb "$repo_path" set-default=agent >/dev/null
+  run_cwb "$repo_path" alpha --yolo >/dev/null
+
+  assert_contains "$repo_path/.test-cli-calls" "agent|" || return 1
+  assert_contains "$repo_path/.test-cli-calls" "--yolo" || return 1
+}
+
 run_test test_new_branch_creates_worktree_and_runs_cleanup
 run_test test_existing_local_branch_skips_cleanup
 run_test test_remote_only_branch_creates_tracking_worktree
@@ -619,6 +650,8 @@ run_test test_zshrc_source_uses_sourced_file_dir
 run_test test_new_flag_creates_random_worktree_non_interactively
 run_test test_env_setup_sanitizes_nested_worktree_name_for_compose
 run_test test_env_setup_generates_worktree_port_overrides
+run_test test_set_default_agent_persists_and_launches_agent
+run_test test_yolo_maps_to_agent_flag
 run_test test_cwb_compose_exports_env_local_overrides
 
 echo "[RESULT] Passed: $pass_count, Failed: $fail_count"
