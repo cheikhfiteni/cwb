@@ -200,6 +200,21 @@ run_cwb_with_env() {
   )
 }
 
+run_cwb_with_wrap_sh() {
+  local repo_path="$1"
+  local wrap_sh="$2"
+  shift 2
+  (
+    cd "$repo_path"
+    env \
+      PATH="$repo_path/bin:$PATH" \
+      HOME="$repo_path/home" \
+      CWB_TEST_LOG="$repo_path/.test-cli-calls" \
+      CWB_WRAP_SH="$wrap_sh" \
+      bash -lc 'source ./cwb; cwb "$@"' bash "$@"
+  )
+}
+
 run_cwb_with_input() {
   local repo_path="$1"
   local stdin_text="$2"
@@ -213,6 +228,22 @@ run_cwb_with_input() {
       CWB_TEST_INTERACTIVE=1 \
       bash -lc 'source ./cwb; cwb "$@"' bash "$@"
   )
+}
+
+write_doppler_stub() {
+  local repo_path="$1"
+  cat > "$repo_path/bin/doppler" <<'DOPPLER_BIN'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "doppler|$PWD|$*" >> "${CWB_TEST_LOG:?missing CWB_TEST_LOG}"
+if [[ "${1:-}" != "run" || "${2:-}" != "--" ]]; then
+  echo "unexpected doppler args: $*" >&2
+  exit 1
+fi
+shift 2
+"$@"
+DOPPLER_BIN
+  chmod +x "$repo_path/bin/doppler"
 }
 
 run_env_setup() {
@@ -357,6 +388,63 @@ test_yolo_maps_to_claude_flag() {
 
   assert_contains "$repo_path/.test-cli-calls" "claude|" || return 1
   assert_contains "$repo_path/.test-cli-calls" "--dangerously-skip-permissions" || return 1
+}
+
+test_wrap_sh_env_wraps_selected_agent() {
+  local repo_path
+  repo_path="$(setup_repo "wrap-sh-env")"
+  write_doppler_stub "$repo_path"
+
+  run_cwb "$repo_path" set-default=codex >/dev/null
+  run_cwb_with_wrap_sh "$repo_path" "doppler run --" wrapped -- --model gpt-5 "finish task" >/dev/null
+
+  assert_contains "$repo_path/.test-cli-calls" "doppler|$repo_path/.cwb/worktrees/wrapped|run -- codex --model gpt-5 finish task" || return 1
+  assert_contains "$repo_path/.test-cli-calls" "codex|$repo_path/.cwb/worktrees/wrapped|--model gpt-5 finish task" || return 1
+  assert_not_contains "$repo_path/.test-cli-calls" "doppler|$repo_path/.cwb/worktrees/wrapped|run -- cwb" || return 1
+}
+
+test_wrap_sh_flag_wraps_agent_for_one_launch() {
+  local repo_path
+  repo_path="$(setup_repo "wrap-sh-flag")"
+  write_doppler_stub "$repo_path"
+
+  run_cwb "$repo_path" alpha --wrap-sh "doppler run --" -- "review this" >/dev/null
+
+  assert_contains "$repo_path/.test-cli-calls" "doppler|$repo_path/.cwb/worktrees/alpha|run -- claude review this" || return 1
+  assert_contains "$repo_path/.test-cli-calls" "claude|$repo_path/.cwb/worktrees/alpha|review this" || return 1
+}
+
+test_wrap_sh_flag_wraps_agent_in_tmux() {
+  local repo_path
+  repo_path="$(setup_repo "wrap-sh-tmux")"
+  write_doppler_stub "$repo_path"
+
+  run_cwb "$repo_path" set-default=codex >/dev/null
+  run_cwb "$repo_path" alpha --tmux --wrap-sh "doppler run --" -- "tmux task" >/dev/null
+
+  assert_contains "$repo_path/.test-cli-calls" "tmux|cwb-alpha|$repo_path/.cwb/worktrees/alpha|" || return 1
+  assert_contains "$repo_path/.test-cli-calls" "doppler|$repo_path/.cwb/worktrees/alpha|run -- codex tmux task" || return 1
+  assert_contains "$repo_path/.test-cli-calls" "codex|$repo_path/.cwb/worktrees/alpha|tmux task" || return 1
+}
+
+test_set_wrap_sh_persists_and_clear_wrap_sh_disables() {
+  local repo_path
+  repo_path="$(setup_repo "wrap-sh-persisted")"
+  write_doppler_stub "$repo_path"
+
+  run_cwb "$repo_path" set-default=codex >/dev/null
+  run_cwb "$repo_path" set-wrap-sh -- doppler run -- >/dev/null
+  assert_contains "$repo_path/home/.cwb/.cwb-prefs" "USER_WRAP_SH=doppler run --" || return 1
+
+  run_cwb "$repo_path" wrapped >/dev/null
+  assert_contains "$repo_path/.test-cli-calls" "doppler|$repo_path/.cwb/worktrees/wrapped|run -- codex" || return 1
+
+  run_cwb "$repo_path" clear-wrap-sh >/dev/null
+  : > "$repo_path/.test-cli-calls"
+  run_cwb "$repo_path" direct >/dev/null
+
+  assert_not_contains "$repo_path/.test-cli-calls" "doppler|" || return 1
+  assert_contains "$repo_path/.test-cli-calls" "codex|$repo_path/.cwb/worktrees/direct|" || return 1
 }
 
 test_interactive_set_defaults_persists_status_and_runtime_flags() {
@@ -610,6 +698,10 @@ run_test test_picker_mode_with_double_dash_selects_typed_name
 run_test test_set_default_persists_in_home_directory
 run_test test_pref_parser_preserves_whitespace_values
 run_test test_yolo_maps_to_claude_flag
+run_test test_wrap_sh_env_wraps_selected_agent
+run_test test_wrap_sh_flag_wraps_agent_for_one_launch
+run_test test_wrap_sh_flag_wraps_agent_in_tmux
+run_test test_set_wrap_sh_persists_and_clear_wrap_sh_disables
 run_test test_interactive_set_defaults_persists_status_and_runtime_flags
 run_test test_no_yolo_overrides_persisted_default
 run_test test_set_defaults_requires_interactive_terminal

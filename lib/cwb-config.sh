@@ -203,6 +203,23 @@ _cwb_read_shared_flag_default() {
   _cwb_read_user_pref "SHARED_FLAG_${flag_name}" "off"
 }
 
+_cwb_read_wrap_sh() {
+  if [[ "${CWB_WRAP_SH+x}" == "x" ]]; then
+    printf '%s' "$CWB_WRAP_SH"
+  else
+    _cwb_read_user_pref 'USER_WRAP_SH' ''
+  fi
+}
+
+_cwb_write_wrap_sh() {
+  local wrap_sh="$1"
+  _cwb_write_user_pref "USER_WRAP_SH" "$wrap_sh"
+}
+
+_cwb_clear_wrap_sh() {
+  _cwb_delete_user_pref "USER_WRAP_SH"
+}
+
 _cwb_write_shared_flag_default() {
   local flag_name="$1" value="$2"
   _cwb_write_user_pref "SHARED_FLAG_${flag_name}" "$(_cwb_normalize_bool "$value")"
