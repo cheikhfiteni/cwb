@@ -11,6 +11,8 @@ Usage:
   cwb <name> [cwb flags] [-- <agent args...>]
   cwb cwb-setup [-- <agent args>]
   cwb set-default=<claude|codex|agent>
+  cwb set-wrap-sh <shell wrapper>
+  cwb clear-wrap-sh
   cwb --set-defaults
   cwb --status
   cwb --help
@@ -19,6 +21,7 @@ Launch defaults:
   No args: interactive picker on a TTY; random branch when non-interactive.
   --new: skip the picker and force a fresh random branch name.
   Shared defaults are stored in ~/.cwb/.cwb-prefs and are set only via --set-defaults.
+  CWB_WRAP_SH overrides the persisted wrapper shell for a single process.
 
 CWB flags:
   --tmux                Run the agent in a new tmux session.
@@ -28,6 +31,9 @@ CWB flags:
   --copy-volumes=true   Prefix Docker volumes with the worktree name.
   --copy-volumes=false  Disable Docker volume isolation.
   --no-mcp              Disable project MCP servers in the worktree session.
+  --wrap-sh <shell>     Prefix the selected agent with a shell fragment for this launch.
+  --wrap-sh=<shell>     Same as --wrap-sh <shell>.
+  --no-wrap-sh          Ignore CWB_WRAP_SH and any persisted wrapper for this launch.
   --new                 Force a new random branch instead of opening the picker.
   --set-defaults        Interactively set shared defaults for supported agents.
   --status              Print version, prefs path, and effective defaults.
@@ -45,6 +51,13 @@ Forwarding args:
   Use "--" to separate cwb flags from raw agent flags when needed.
   Example: cwb fix-auth --yolo -- --model gpt-5.4 -c
 
+Agent wrappers:
+  CWB_WRAP_SH='doppler run --' cwb fix-auth
+  cwb fix-auth --wrap-sh 'lapdog'
+  cwb set-wrap-sh -- doppler run --
+  cwb clear-wrap-sh
+  The wrapper is evaluated as shell before the selected agent; agent args are quoted.
+
 Shared flag mapping:
   yolo -> cwb flag: --yolo
     codex: --yolo
@@ -60,20 +73,33 @@ Examples:
   cwb cwb-setup
   cwb --set-defaults
   cwb --new --yolo
+  CWB_WRAP_SH='doppler run --' cwb inbox-refactor
   cwb inbox-refactor --tmux -- --model gpt-5.4
   cwb set-default=codex
 EOF
 }
 
 _cwb_print_status() {
-  local prefs_file default_cli key val flag_name agent_name mapping
+  local prefs_file default_cli wrap_sh wrap_source key val flag_name agent_name mapping
   prefs_file="$(_cwb_user_prefs_file)"
   default_cli="$(_cwb_read_default_cli)"
+  wrap_sh="$(_cwb_read_wrap_sh)"
+  if [[ "${CWB_WRAP_SH+x}" == "x" ]]; then
+    wrap_source="CWB_WRAP_SH"
+  else
+    wrap_source="prefs"
+  fi
 
   echo "cwb status"
   echo "Version: $CWB_VERSION"
   echo "Preferences file: $prefs_file"
   echo "Default CLI: $default_cli"
+  if [[ -n "$wrap_sh" ]]; then
+    echo "Wrapper shell: $wrap_sh"
+    echo "Wrapper shell source: $wrap_source"
+  else
+    echo "Wrapper shell: <none>"
+  fi
   for flag_name in $(_cwb_shared_flags); do
     echo "Shared default [$flag_name]: $(_cwb_read_shared_flag_default "$flag_name")"
     echo "Equivalent cwb flag [$flag_name]: $(_cwb_shared_flag_equivalent_cwb_flag "$flag_name")"
@@ -87,7 +113,7 @@ _cwb_print_status() {
     while IFS='=' read -r key val; do
       [[ -n "$key" ]] || continue
       case "$key" in
-        USER_DEFAULT_CLI|CWB_CLI|SHARED_FLAG_*) continue ;;
+        USER_DEFAULT_CLI|CWB_CLI|USER_WRAP_SH|SHARED_FLAG_*) continue ;;
       esac
       echo "User pref [$key]: $val"
     done < "$prefs_file"

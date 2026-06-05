@@ -8,6 +8,7 @@
 #   cwb --new                                     # force a new random branch/worktree
 #   cwb fix-auth                                  # named branch/worktree
 #   cwb fix-auth --tmux --yolo -- --model gpt-5   # cwb flags + forwarded CLI flags
+#   CWB_WRAP_SH='doppler run --' cwb fix-auth      # wrap only the selected agent command
 #   cwb fix-auth --copy-volumes=false             # skip docker-compose volume isolation
 #
 # Flags (consumed by cwb, not forwarded to the CLI):
@@ -18,6 +19,8 @@
 #   --copy-volumes=true     prefix docker named volumes with worktree name (default: true)
 #   --copy-volumes=false    skip volume isolation
 #   --no-mcp                disable project MCP servers in this worktree session
+#   --wrap-sh <shell>       wrap the selected agent with a shell fragment for this launch
+#   --no-wrap-sh            ignore CWB_WRAP_SH and persisted wrapper for this launch
 #   --new                   force a new random branch instead of opening the picker
 #   --set-defaults          interactively set shared defaults
 #   --help                  print cwb help and exit
@@ -32,6 +35,8 @@
 #   cwb set-default=claude             use claude as the default CLI (default)
 #   cwb set-default=codex              use codex as the default CLI
 #   cwb set-default=agent              use cursor agent as the default CLI
+#   cwb set-wrap-sh <shell>            persist a shell wrapper for the selected agent
+#   cwb clear-wrap-sh                  clear the persisted shell wrapper
 #   cwb cwb-setup [-- <agent args>]     open the repo-setup worktree; pass -- to override default prompt
 #   cwb --set-defaults                 interactively set shared defaults
 
@@ -303,10 +308,25 @@ sys.stdout.write(content.rstrip() + '\n')
 
 _cwb_build_cli_shell_command() {
   local cli_name="$1"
+  local wrap_sh="${2:-}"
   # NOTE: reads $cli_args from the caller's scope (bash dynamic scoping).
+  if [[ -n "$wrap_sh" ]]; then
+    printf '%s ' "$wrap_sh"
+  fi
   printf '%q' "$cli_name"
   for arg in "${cli_args[@]}"; do
     printf ' %q' "$arg"
+  done
+}
+
+_cwb_join_shell_words() {
+  local first=true arg
+  for arg in "$@"; do
+    if ! $first; then
+      printf ' '
+    fi
+    printf '%q' "$arg"
+    first=false
   done
 }
 
@@ -385,6 +405,39 @@ cwb() {
     return $?
   fi
 
+  if [[ "${1:-}" == "set-wrap-sh" ]]; then
+    shift
+    if [[ "${1:-}" == "--" ]]; then
+      shift
+    fi
+    if [[ $# -eq 0 ]]; then
+      echo "[cwb] Usage: cwb set-wrap-sh <shell wrapper>" >&2
+      return 1
+    fi
+    local new_wrap_sh
+    if [[ $# -eq 1 ]]; then
+      new_wrap_sh="$1"
+    else
+      new_wrap_sh="$(_cwb_join_shell_words "$@")"
+    fi
+    _cwb_write_wrap_sh "$new_wrap_sh" || return 1
+    echo "[cwb] Wrapper shell set to: $new_wrap_sh"
+    return 0
+  fi
+
+  if [[ "${1:-}" == set-wrap-sh=* ]]; then
+    local new_wrap_sh="${1#set-wrap-sh=}"
+    _cwb_write_wrap_sh "$new_wrap_sh" || return 1
+    echo "[cwb] Wrapper shell set to: $new_wrap_sh"
+    return 0
+  fi
+
+  if [[ "${1:-}" == "clear-wrap-sh" ]]; then
+    _cwb_clear_wrap_sh || return 1
+    echo "[cwb] Wrapper shell cleared"
+    return 0
+  fi
+
   # Handle set-default subcommand: cwb set-default=claude | cwb set-default=codex
   if [[ "${1:-}" == set-default=* ]]; then
     local new_cli="${1#set-default=}"
@@ -403,6 +456,7 @@ cwb() {
   local copy_volumes="true"
   local no_mcp=false
   local cli_args=()
+  local wrap_sh=""
   local picker_requested=false
   local force_picker_mode=false
   local force_new_random=false
@@ -428,6 +482,7 @@ cwb() {
   repo_root="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)" || return 1
   use_tmux="$(_cwb_read_shared_flag_default "tmux")"
   use_yolo="$(_cwb_read_shared_flag_default "yolo")"
+  wrap_sh="$(_cwb_read_wrap_sh)"
 
   # Passing -- first forces name picker mode; remaining args are parsed normally
   if [[ "${1:-}" == "--" ]]; then
@@ -468,6 +523,17 @@ cwb() {
       no_mcp=true
     elif [[ "$arg" == "--new" ]]; then
       force_new_random=true
+    elif [[ "$arg" == "--wrap-sh" ]]; then
+      if [[ $# -eq 0 ]]; then
+        echo "[cwb] Error: --wrap-sh requires a shell wrapper argument" >&2
+        return 1
+      fi
+      wrap_sh="$1"
+      shift
+    elif [[ "$arg" == --wrap-sh=* ]]; then
+      wrap_sh="${arg#--wrap-sh=}"
+    elif [[ "$arg" == "--no-wrap-sh" ]]; then
+      wrap_sh=""
     else
       cli_args+=("$arg")
     fi
@@ -559,9 +625,13 @@ cwb() {
   local cleanup_script="$repo_root/scripts/cwb/lib/lifecycle/cwb-cleanup.sh"
   local lockfile="$worktree_path/.cwb.lock"
 
-  echo "[cwb] Starting $cwb_cli in worktree: $worktree_path (branch: $branch_name)"
+  if [[ -n "$wrap_sh" ]]; then
+    echo "[cwb] Starting $cwb_cli via wrapper in worktree: $worktree_path (branch: $branch_name)"
+  else
+    echo "[cwb] Starting $cwb_cli in worktree: $worktree_path (branch: $branch_name)"
+  fi
 
-  if ! command -v "$cwb_cli" &>/dev/null; then
+  if [[ -z "$wrap_sh" ]] && ! command -v "$cwb_cli" &>/dev/null; then
     echo "[cwb] Error: '$cwb_cli' not found in PATH. Install it or run: cwb set-default=claude" >&2
     rm -f "$lockfile" 2>/dev/null
     return 1
@@ -576,6 +646,9 @@ cwb() {
     cli_args+=("$(cat "$reserved_prompt_file")")
   fi
 
+  local cli_shell_command
+  cli_shell_command="$(_cwb_build_cli_shell_command "$cwb_cli" "$wrap_sh")"
+
   # Run update check in the background so it overlaps with the CLI session
   # rather than adding latency after it exits.
   local _cwb_upd_tmp
@@ -589,7 +662,7 @@ cwb() {
     local tmpscript
     tmpscript=$(mktemp /tmp/cwb.XXXXXX)
     {
-      _cwb_build_cli_shell_command "$cwb_cli"
+      printf '%s' "$cli_shell_command"
       printf '\nrc=$?\n'
       printf 'rm -f %q\n' "$tmpscript"
       printf '[ "$rc" -ne 0 ] && { echo; read -rp "[cwb] %s exited $rc — press enter to continue "; echo; }\n' "$cwb_cli"
@@ -603,7 +676,7 @@ cwb() {
   else
     # Write lockfile with the subshell PID (BASHPID is the subshell's own PID, not the parent's)
     echo "pid:$BASHPID" > "$lockfile"
-    (cd "$worktree_path" && "$cwb_cli" "${cli_args[@]}")
+    (cd "$worktree_path" && eval "$cli_shell_command")
     rm -f "$lockfile"
     if $run_cleanup; then
       bash "$cleanup_script" "$worktree_path" "$initial_commit" "$branch_name" "$repo_root"
