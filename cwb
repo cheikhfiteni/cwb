@@ -332,21 +332,22 @@ _cwb_join_shell_words() {
 
 # Check for a newer cwb release. Writes a one-line upgrade hint to stdout if an
 # update is found; writes nothing if up-to-date or the check cannot complete.
-# Results are cached in ~/.cwb/.version-check for 24 hours so the network is
-# only hit once per day. Set CWB_NO_UPDATE_CHECK=1 to disable entirely.
+# Results are cached in ~/.cwb/.version-check briefly so repeated cwb launches
+# do not all hit the network. Set CWB_NO_UPDATE_CHECK=1 to disable entirely.
 _cwb_check_for_update() {
   [[ -n "${CWB_NO_UPDATE_CHECK:-}" ]] && return 0
 
   local cache_file="${HOME}/.cwb/.version-check"
+  local cache_ttl="${CWB_UPDATE_CHECK_CACHE_TTL_SECONDS:-900}"
   local latest=""
 
-  # Use cache when fresh (< 24 h)
+  # Use cache when fresh.
   if [[ -f "$cache_file" ]]; then
     local now mtime age
     now=$(date +%s)
-    mtime=$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null || echo 0)
+    mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null || echo 0)
     age=$(( now - mtime ))
-    if (( age < 14400 )); then
+    if (( age < cache_ttl )); then
       latest=$(cat "$cache_file" 2>/dev/null || true)
     fi
   fi
@@ -375,7 +376,7 @@ _cwb_check_for_update() {
     local a=$(( ${cur[i]:-0} )) b=$(( ${new[i]:-0} ))
     if (( a < b )); then
       printf '\n[cwb] Update available: v%s → v%s\n' "$CWB_VERSION" "$latest"
-      printf '[cwb] Upgrade: brew upgrade cheikhfiteni/tap/cwb\n'
+      printf '[cwb] Upgrade: brew update && brew upgrade cheikhfiteni/tap/cwb\n'
       printf '[cwb] (Set CWB_NO_UPDATE_CHECK=1 to silence this message)\n'
       return 0
     elif (( a > b )); then
