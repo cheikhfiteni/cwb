@@ -338,7 +338,7 @@ _cwb_check_for_update() {
   [[ -n "${CWB_NO_UPDATE_CHECK:-}" ]] && return 0
 
   local cache_file="${HOME}/.cwb/.version-check"
-  local cache_ttl="${CWB_UPDATE_CHECK_CACHE_TTL_SECONDS:-900}"
+  local cache_ttl="${CWB_UPDATE_CHECK_CACHE_TTL_SECONDS:-120}"
   local latest=""
 
   # Use cache when fresh.
@@ -385,7 +385,7 @@ _cwb_check_for_update() {
   done
 }
 
-cwb() {
+_cwb_main() {
   if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]; then
     _cwb_print_help
     return 0
@@ -690,4 +690,8 @@ cwb() {
     cat "$_cwb_upd_tmp" >&2
   fi
   rm -f "$_cwb_upd_tmp"
+}
+
+cwb() {
+  _cwb_main "$@"
 }

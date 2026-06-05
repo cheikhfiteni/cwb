@@ -620,6 +620,16 @@ test_help_is_non_interactive_and_does_not_launch_cli() {
   assert_equals "0" "$worktree_count" || return 1
 }
 
+test_sourced_cwb_function_is_small_wrapper() {
+  local repo_path output
+  repo_path="$(setup_repo "small-wrapper")"
+
+  output="$(cd "$repo_path" && HOME="$repo_path/home" bash -lc 'source ./cwb; declare -f cwb')"
+
+  [[ "$output" == *'_cwb_main "$@"'* ]] || fail "Expected cwb function to call _cwb_main" || return 1
+  [[ "$output" != *"git worktree add"* ]] || fail "Expected cwb function wrapper not full implementation" || return 1
+}
+
 test_reserved_cwb_setup_uses_repo_setup_prompt() {
   local repo_path
   repo_path="$(setup_repo "reserved-cwb-setup")"
@@ -837,6 +847,7 @@ run_test test_status_prints_wrap_sh_pref_and_env_override
 run_test test_update_check_refreshes_stale_cache_and_suggests_brew_update
 run_test test_update_prompt_prints_after_cwb_run
 run_test test_help_is_non_interactive_and_does_not_launch_cli
+run_test test_sourced_cwb_function_is_small_wrapper
 run_test test_reserved_cwb_setup_uses_repo_setup_prompt
 run_test test_reserved_cwb_setup_keeps_passthrough_args
 run_test test_zsh_source_wrapper_loads_help_helpers
