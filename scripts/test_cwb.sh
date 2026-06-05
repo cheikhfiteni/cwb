@@ -213,6 +213,7 @@ run_cwb_with_env() {
       PATH="$repo_path/bin:$PATH" \
       HOME="$repo_path/home" \
       CWB_TEST_LOG="$repo_path/.test-cli-calls" \
+      CWB_NO_UPDATE_CHECK=1 \
       ${extra_env:+$extra_env} \
       bash -lc 'source ./cwb; cwb "$@"' bash "$@"
   )
@@ -229,6 +230,7 @@ run_cwb_with_wrap_sh() {
       HOME="$repo_path/home" \
       CWB_TEST_LOG="$repo_path/.test-cli-calls" \
       CWB_WRAP_SH="$wrap_sh" \
+      CWB_NO_UPDATE_CHECK=1 \
       bash -lc 'source ./cwb; cwb "$@"' bash "$@"
   )
 }
@@ -244,6 +246,7 @@ run_cwb_with_input() {
       HOME="$repo_path/home" \
       CWB_TEST_LOG="$repo_path/.test-cli-calls" \
       CWB_TEST_INTERACTIVE=1 \
+      CWB_NO_UPDATE_CHECK=1 \
       bash -lc 'source ./cwb; cwb "$@"' bash "$@"
   )
 }
@@ -580,6 +583,25 @@ test_update_check_refreshes_stale_cache_and_suggests_brew_update() {
   assert_equals "$next_version" "$(cat "$cache_file")" || return 1
 }
 
+test_update_prompt_prints_after_cwb_run() {
+  local repo_path major minor patch next_version output cache_file
+  repo_path="$(setup_repo "update-prompt-after-run")"
+
+  IFS='.' read -r major minor patch <<< "$CURRENT_VERSION"
+  next_version="${major}.${minor}.$((patch + 1))"
+  cache_file="$repo_path/home/.cwb/.version-check"
+
+  mkdir -p "$repo_path/home/.cwb"
+  printf '%s\n' "$next_version" > "$cache_file"
+
+  output="$(run_cwb_with_env "$repo_path" "CWB_NO_UPDATE_CHECK=" update-check 2>&1)"
+
+  [[ "$output" == *"Starting claude in worktree"* ]] || fail "Expected normal cwb launch output" || return 1
+  [[ "$output" == *"Update available: v$CURRENT_VERSION"* ]] || fail "Expected update notification after cwb run" || return 1
+  [[ "$output" == *"v$next_version"* ]] || fail "Expected latest version in update notification" || return 1
+  [[ "$output" == *"brew update && brew upgrade cheikhfiteni/tap/cwb"* ]] || fail "Expected brew update upgrade hint" || return 1
+}
+
 test_help_is_non_interactive_and_does_not_launch_cli() {
   local repo_path
   repo_path="$(setup_repo "help-output")"
@@ -813,6 +835,7 @@ run_test test_set_defaults_requires_interactive_terminal
 run_test test_status_prints_version_and_preferences
 run_test test_status_prints_wrap_sh_pref_and_env_override
 run_test test_update_check_refreshes_stale_cache_and_suggests_brew_update
+run_test test_update_prompt_prints_after_cwb_run
 run_test test_help_is_non_interactive_and_does_not_launch_cli
 run_test test_reserved_cwb_setup_uses_repo_setup_prompt
 run_test test_reserved_cwb_setup_keeps_passthrough_args
