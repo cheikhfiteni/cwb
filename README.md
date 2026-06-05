@@ -13,14 +13,14 @@ brew tap cheikhfiteni/tap
 brew install cheikhfiteni/tap/cwb
 ```
 
-Then add cwb to your shell profile:
+Then verify the command is on your `PATH`:
 
 ```bash
-# ~/.zshrc or ~/.bashrc
-source "$(brew --prefix)/opt/cwb/cwb"
+cwb --version
 ```
 
-Reload your shell (`source ~/.zshrc`) or open a new terminal.
+If you previously installed cwb by sourcing it from your shell profile, remove
+that old `source "$(brew --prefix)/opt/cwb/cwb"` line and open a new terminal.
 
 ### Manual
 
