@@ -1,5 +1,6 @@
 # cwb runtime — worktrees created when running cwb on this repo itself
 .cwb/worktrees/
+.cwb.lock
 
 # macOS
 .DS_Store
