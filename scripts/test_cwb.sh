@@ -137,6 +137,17 @@ echo "agent|$PWD|$*" >> "${CWB_TEST_LOG:?missing CWB_TEST_LOG}"
 AGENT_BIN
   chmod +x "$repo_path/bin/agent"
 
+  cat > "$repo_path/bin/curl" <<'CURL_BIN'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${CWB_TEST_CURL_RESPONSE:-}" ]]; then
+  printf '%s\n' "$CWB_TEST_CURL_RESPONSE"
+  exit 0
+fi
+exit 22
+CURL_BIN
+  chmod +x "$repo_path/bin/curl"
+
   cat > "$repo_path/bin/tmux" <<'TMUX_BIN'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -542,6 +553,33 @@ test_status_prints_wrap_sh_pref_and_env_override() {
   [[ "$output" == *"Wrapper shell source: CWB_WRAP_SH"* ]] || fail "Expected wrapper env source in status output" || return 1
 }
 
+test_update_check_refreshes_stale_cache_and_suggests_brew_update() {
+  local repo_path major minor patch next_version output cache_file
+  repo_path="$(setup_repo "update-check-stale-cache")"
+
+  IFS='.' read -r major minor patch <<< "$CURRENT_VERSION"
+  next_version="${major}.${minor}.$((patch + 1))"
+  cache_file="$repo_path/home/.cwb/.version-check"
+
+  mkdir -p "$repo_path/home/.cwb"
+  printf '%s\n' "$CURRENT_VERSION" > "$cache_file"
+  touch -t 202001010000 "$cache_file"
+
+  output="$(
+    cd "$repo_path"
+    env \
+      PATH="$repo_path/bin:$PATH" \
+      HOME="$repo_path/home" \
+      CWB_TEST_CURL_RESPONSE="{\"tag_name\":\"v${next_version}\"}" \
+      bash -c 'source ./cwb; _cwb_check_for_update'
+  )"
+
+  [[ "$output" == *"Update available: v$CURRENT_VERSION"* ]] || fail "Expected update notification" || return 1
+  [[ "$output" == *"v$next_version"* ]] || fail "Expected latest version in update notification" || return 1
+  [[ "$output" == *"brew update && brew upgrade cheikhfiteni/tap/cwb"* ]] || fail "Expected brew update upgrade hint" || return 1
+  assert_equals "$next_version" "$(cat "$cache_file")" || return 1
+}
+
 test_help_is_non_interactive_and_does_not_launch_cli() {
   local repo_path
   repo_path="$(setup_repo "help-output")"
@@ -774,6 +812,7 @@ run_test test_no_yolo_overrides_persisted_default
 run_test test_set_defaults_requires_interactive_terminal
 run_test test_status_prints_version_and_preferences
 run_test test_status_prints_wrap_sh_pref_and_env_override
+run_test test_update_check_refreshes_stale_cache_and_suggests_brew_update
 run_test test_help_is_non_interactive_and_does_not_launch_cli
 run_test test_reserved_cwb_setup_uses_repo_setup_prompt
 run_test test_reserved_cwb_setup_keeps_passthrough_args
