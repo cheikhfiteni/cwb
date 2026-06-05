@@ -12,22 +12,27 @@ class Cwb < Formula
 
   def install
     prefix.install "cwb", "lib"
+    (bin/"cwb").write <<~EOS
+      #!/usr/bin/env bash
+      source "#{opt_prefix}/cwb"
+      cwb "$@"
+    EOS
+    chmod 0755, bin/"cwb"
   end
 
   def caveats
     <<~EOS
-      Add the following to your shell profile (~/.zshrc or ~/.bashrc):
+      cwb is installed as a command on PATH.
+
+      If you previously installed cwb by sourcing it from your shell profile,
+      remove this line and open a new shell:
 
         source "#{opt_prefix}/cwb"
-
-      Then reload your shell:
-
-        source ~/.zshrc
     EOS
   end
 
   test do
-    output = shell_output("bash -c 'source #{opt_prefix}/cwb && cwb --version'")
+    output = shell_output("#{bin}/cwb --version")
     assert_match "cwb", output
   end
 end
