@@ -4,14 +4,10 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - 'cwb'
-      - 'lib/**'
-      - 'scripts/**'
-      - '.github/workflows/test-cwb.yml'
+  workflow_dispatch:
 
 concurrency:
-  group: test-cwb-${{ github.event.pull_request.number }}
+  group: test-cwb-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

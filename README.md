@@ -159,6 +159,17 @@ bash scripts/test_cwb.sh
 
 The suite creates temporary git repos/remotes, stubs the CLI binaries (`claude`/`codex`), and verifies worktree/branch resolution behavior end-to-end.
 
+## CI automation
+
+- PRs targeting `main` run `.github/workflows/test-cwb.yml`, which executes `bash scripts/test_cwb.sh`.
+- Pushes to `main` run `.github/workflows/release-cwb.yml`, which reruns the same tests and then executes `bash scripts/release_on_main.sh`.
+- The release script is idempotent:
+  - if `HEAD` is already tagged and released, it no-ops,
+  - if `CWB_VERSION` is new, it releases that version,
+  - if the current version was already released on an older commit, it bumps the patch version, commits `release: vx.y.z`, pushes that commit, then tags and releases it.
+- If `main` is protected, allow the release workflow's credential to bypass the direct-push restriction for this automated release commit, or replace `GITHUB_TOKEN` with a bot/App token that has that bypass.
+- To auto-update the Homebrew tap as part of the release, set the repo secret `HOMEBREW_TAP_PUSH_TOKEN` with push access to `cheikhfiteni/homebrew-tap`. Without it, GitHub Releases still publish normally and tap sync is skipped.
+
 ## Releasing (maintainers)
 
 cwb uses [Semantic Versioning](https://semver.org). The version lives in `cwb` at `CWB_VERSION="x.y.z"`. The Homebrew formula lives in the separate [`cheikhfiteni/homebrew-tap`](https://github.com/cheikhfiteni/homebrew-tap) repo (a generic tap that hosts all `cheikhfiteni` tools).
