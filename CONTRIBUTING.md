@@ -40,12 +40,11 @@ The release script is idempotent:
 3. Install the app on only these repositories:
    - `cheikhfiteni/cwb`
    - `cheikhfiteni/homebrew-tap`
-4. In `cheikhfiteni/cwb`, add the Actions repository variable:
+4. In `cheikhfiteni/cwb`, add the Actions repository secrets:
    - `CWB_RELEASE_APP_CLIENT_ID`: the app client ID.
-5. In `cheikhfiteni/cwb`, add the Actions repository secret:
    - `CWB_RELEASE_APP_PRIVATE_KEY`: the full private key PEM generated for the app.
-6. In the `cheikhfiteni/cwb` `main` ruleset, add the GitHub App to the bypass list with `Always allow` bypass mode.
-7. In `cheikhfiteni/homebrew-tap`, leave `main` unprotected or add the same GitHub App to the tap's `main` ruleset/branch protection with direct-push access. The release script updates `Formula/cwb.rb` directly during release.
+5. In the `cheikhfiteni/cwb` `main` ruleset, add the GitHub App to the bypass list with `Always allow` bypass mode.
+6. In `cheikhfiteni/homebrew-tap`, leave `main` unprotected or add the same GitHub App to the tap's `main` ruleset/branch protection with direct-push access. The release script updates `Formula/cwb.rb` directly during release.
 
 The workflow uses `actions/create-github-app-token` to mint an installation token with `contents: write` for both repos. That token is used for checkout, release commits, tag pushes, GitHub Release creation via `GH_TOKEN`, and the Homebrew tap clone/push via `CWB_RELEASE_APP_TOKEN`.
 

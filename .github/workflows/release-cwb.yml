@@ -23,7 +23,7 @@ jobs:
 
       - name: Validate release app config
         env:
-          CWB_RELEASE_APP_CLIENT_ID: ${{ vars.CWB_RELEASE_APP_CLIENT_ID }}
+          CWB_RELEASE_APP_CLIENT_ID: ${{ secrets.CWB_RELEASE_APP_CLIENT_ID }}
           CWB_RELEASE_APP_PRIVATE_KEY: ${{ secrets.CWB_RELEASE_APP_PRIVATE_KEY }}
         run: |
           if [[ -z "$CWB_RELEASE_APP_CLIENT_ID" || -z "$CWB_RELEASE_APP_PRIVATE_KEY" ]]; then
@@ -35,7 +35,7 @@ jobs:
         id: release-app-token
         uses: actions/create-github-app-token@v3
         with:
-          client-id: ${{ vars.CWB_RELEASE_APP_CLIENT_ID }}
+          client-id: ${{ secrets.CWB_RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.CWB_RELEASE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: |
