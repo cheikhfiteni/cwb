@@ -330,11 +330,36 @@ _cwb_join_shell_words() {
   done
 }
 
-# Check for a newer cwb release. Writes a one-line upgrade hint to stdout if an
-# update is found; writes nothing if up-to-date or the check cannot complete.
-# Results are cached in ~/.cwb/.version-check briefly so repeated cwb launches
-# do not all hit the network. Set CWB_NO_UPDATE_CHECK=1 to disable entirely.
-_cwb_check_for_update() {
+_cwb_update_command() {
+  printf '%s' "${CWB_UPDATE_COMMAND:-brew update && brew upgrade cheikhfiteni/tap/cwb}"
+}
+
+_cwb_version_part() {
+  local version="$1"
+  local index="$2"
+  local part=""
+  local i=0
+
+  while (( i <= index )); do
+    part="${version%%.*}"
+    if [[ "$version" == *.* ]]; then
+      version="${version#*.}"
+    else
+      version=""
+    fi
+    i=$((i + 1))
+  done
+
+  part="${part%%[!0-9]*}"
+  printf '%s' "${part:-0}"
+}
+
+# Check for a newer cwb release. Writes the latest version to stdout when a
+# newer release is found; writes nothing if up-to-date or the check cannot
+# complete. Results are cached in ~/.cwb/.version-check briefly so repeated cwb
+# launches do not all hit the network. Set CWB_NO_UPDATE_CHECK=1 to disable
+# entirely.
+_cwb_latest_available_update() {
   [[ -n "${CWB_NO_UPDATE_CHECK:-}" ]] && return 0
 
   local cache_file="${HOME}/.cwb/.version-check"
@@ -367,21 +392,99 @@ _cwb_check_for_update() {
 
   [[ -z "$latest" || "$latest" == "$CWB_VERSION" ]] && return 0
 
-  # Pure-bash version comparison (works without sort -V or python)
-  local -a cur new
-  IFS='.' read -ra cur <<< "$CWB_VERSION"
-  IFS='.' read -ra new <<< "$latest"
+  # Shell-compatible version comparison (works without sort -V or python)
   local i
-  for (( i=0; i < ${#cur[@]} || i < ${#new[@]}; i++ )); do
-    local a=$(( ${cur[i]:-0} )) b=$(( ${new[i]:-0} ))
+  for i in 0 1 2; do
+    local a b
+    a="$(_cwb_version_part "$CWB_VERSION" "$i")"
+    b="$(_cwb_version_part "$latest" "$i")"
     if (( a < b )); then
-      printf '\n[cwb] Update available: v%s → v%s\n' "$CWB_VERSION" "$latest"
-      printf '[cwb] Upgrade: brew update && brew upgrade cheikhfiteni/tap/cwb\n'
-      printf '[cwb] (Set CWB_NO_UPDATE_CHECK=1 to silence this message)\n'
+      printf '%s\n' "$latest"
       return 0
     elif (( a > b )); then
       return 0
     fi
+  done
+}
+
+_cwb_print_update_notice() {
+  local latest="$1"
+  printf '\n[cwb] Update available: v%s → v%s\n' "$CWB_VERSION" "$latest"
+  printf '[cwb] Upgrade: %s\n' "$(_cwb_update_command)"
+  printf '[cwb] (Set CWB_NO_UPDATE_CHECK=1 to silence this message)\n'
+}
+
+# Backward-compatible helper for tests and manual diagnostics.
+_cwb_check_for_update() {
+  local latest
+  latest="$(_cwb_latest_available_update)"
+  [[ -z "$latest" ]] && return 0
+  _cwb_print_update_notice "$latest"
+}
+
+_cwb_can_prompt() {
+  [[ -n "${CWB_TEST_INTERACTIVE:-}" || -t 0 ]]
+}
+
+_cwb_prompt_for_update() {
+  local latest
+  latest="$(_cwb_latest_available_update)"
+  [[ -z "$latest" ]] && return 0
+
+  _cwb_print_update_notice "$latest" >&2
+
+  if ! _cwb_can_prompt; then
+    echo "[cwb] Continuing without updating because stdin is not interactive." >&2
+    return 0
+  fi
+
+  local response update_command
+  while true; do
+    printf '[cwb] Update now? [Y/n]: ' >&2
+    IFS= read -r response || {
+      echo >&2
+      echo "[cwb] Continuing without updating." >&2
+      return 0
+    }
+    case "$response" in
+      ""|y|Y|yes|YES|Yes)
+        update_command="$(_cwb_update_command)"
+        echo "[cwb] Running: $update_command" >&2
+        if bash -lc "$update_command"; then
+          echo "[cwb] Update complete. Re-run cwb to start with the new version." >&2
+          return 10
+        fi
+
+        echo "[cwb] Update failed." >&2
+        while true; do
+          printf '[cwb] Continue without updating? [y/N]: ' >&2
+          IFS= read -r response || {
+            echo >&2
+            return 1
+          }
+          case "$response" in
+            y|Y|yes|YES|Yes)
+              echo "[cwb] Continuing without updating." >&2
+              return 0
+              ;;
+            ""|n|N|no|NO|No)
+              echo "[cwb] Aborting. Re-run cwb after updating or set CWB_NO_UPDATE_CHECK=1 to skip this check." >&2
+              return 1
+              ;;
+            *)
+              echo "[cwb] Please answer y or n." >&2
+              ;;
+          esac
+        done
+        ;;
+      n|N|no|NO|No)
+        echo "[cwb] Continuing without updating." >&2
+        return 0
+        ;;
+      *)
+        echo "[cwb] Please answer y or n." >&2
+        ;;
+    esac
   done
 }
 
@@ -540,6 +643,15 @@ _cwb_main() {
     fi
   done
 
+  local update_prompt_rc
+  _cwb_prompt_for_update
+  update_prompt_rc=$?
+  if [[ "$update_prompt_rc" -eq 10 ]]; then
+    return 0
+  elif [[ "$update_prompt_rc" -ne 0 ]]; then
+    return "$update_prompt_rc"
+  fi
+
   if $picker_requested && ! $force_new_random; then
     name="$(_cwb_pick_name)" || return 1
   elif [[ -z "$name" ]]; then
@@ -650,13 +762,6 @@ _cwb_main() {
   local cli_shell_command
   cli_shell_command="$(_cwb_build_cli_shell_command "$cwb_cli" "$wrap_sh")"
 
-  # Run update check in the background so it overlaps with the CLI session
-  # rather than adding latency after it exits.
-  local _cwb_upd_tmp
-  _cwb_upd_tmp=$(mktemp)
-  ( _cwb_check_for_update > "$_cwb_upd_tmp" 2>&1 ) &
-  local _cwb_upd_pid=$!
-
   if _cwb_bool_is_true "$use_tmux"; then
     # Write lockfile before launching tmux — the session name is the stable identifier
     echo "tmux:$tmux_session" > "$lockfile"
@@ -683,13 +788,6 @@ _cwb_main() {
       bash "$cleanup_script" "$worktree_path" "$initial_commit" "$branch_name" "$repo_root"
     fi
   fi
-
-  # Display update notification (if any) once the session is over
-  wait "$_cwb_upd_pid" 2>/dev/null || true
-  if [[ -s "$_cwb_upd_tmp" ]]; then
-    cat "$_cwb_upd_tmp" >&2
-  fi
-  rm -f "$_cwb_upd_tmp"
 }
 
 cwb() {
