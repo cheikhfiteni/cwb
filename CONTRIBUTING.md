@@ -25,17 +25,29 @@ The release script is idempotent:
 - If `CWB_VERSION` is new, it releases that version.
 - If the current version was already released on an older commit, it bumps the patch version, commits `release: vx.y.z`, pushes that commit to `main`, then tags and releases it.
 
-### Required release secret
+### Release GitHub App setup
 
-`main` is protected, so the release workflow must authenticate as a release actor that can bypass the `main` branch ruleset.
+`main` is protected, so the release workflow authenticates as a GitHub App installation. The workflow mints a short-lived installation token for `cheikhfiteni/cwb` and `cheikhfiteni/homebrew-tap` at runtime.
 
-1. Create or choose a dedicated release actor, such as a bot user token or GitHub App token, with `contents: write` access to `cheikhfiteni/cwb`.
-2. Add that actor to the `main` ruleset bypass list with `Always allow` bypass mode.
-3. Store the token as the repo secret `CWB_RELEASE_BYPASS_TOKEN`.
+1. Create a GitHub App under the `cheikhfiteni` account:
+   - Go to GitHub `Settings -> Developer settings -> GitHub Apps -> New GitHub App`.
+   - Use a clear name, such as `cwb-release`.
+   - Use the account or repo URL as the homepage URL.
+   - Disable webhooks; this app is only used for Actions authentication.
+   - Repository permissions: `Contents` read/write.
+   - Installation target: only the `cheikhfiteni` account.
+2. After creating the app, generate a private key and copy the app's client ID.
+3. Install the app on only these repositories:
+   - `cheikhfiteni/cwb`
+   - `cheikhfiteni/homebrew-tap`
+4. In `cheikhfiteni/cwb`, add the Actions repository variable:
+   - `CWB_RELEASE_APP_CLIENT_ID`: the app client ID.
+5. In `cheikhfiteni/cwb`, add the Actions repository secret:
+   - `CWB_RELEASE_APP_PRIVATE_KEY`: the full private key PEM generated for the app.
+6. In the `cheikhfiteni/cwb` `main` ruleset, add the GitHub App to the bypass list with `Always allow` bypass mode.
+7. In `cheikhfiteni/homebrew-tap`, leave `main` unprotected or add the same GitHub App to the tap's `main` ruleset/branch protection with direct-push access. The release script updates `Formula/cwb.rb` directly during release.
 
-The workflow uses `CWB_RELEASE_BYPASS_TOKEN` for `actions/checkout`, so the script's `git push origin HEAD:main` and tag pushes authenticate as the bypass actor. The same token is passed to the GitHub CLI as `GH_TOKEN` for GitHub Release creation.
-
-To auto-update the Homebrew tap as part of the release, set the repo secret `HOMEBREW_TAP_PUSH_TOKEN` with push access to `cheikhfiteni/homebrew-tap`. Without it, GitHub Releases still publish normally and tap sync is skipped.
+The workflow uses `actions/create-github-app-token` to mint an installation token with `contents: write` for both repos. That token is used for checkout, release commits, tag pushes, GitHub Release creation via `GH_TOKEN`, and the Homebrew tap clone/push via `CWB_RELEASE_APP_TOKEN`.
 
 ## Manual release fallback
 
