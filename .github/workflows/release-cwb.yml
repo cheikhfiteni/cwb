@@ -16,33 +16,58 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
-      - name: Validate release bypass token
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y zsh gh
+
+      - name: Validate release app config
         env:
-          CWB_RELEASE_BYPASS_TOKEN: ${{ secrets.CWB_RELEASE_BYPASS_TOKEN }}
+          CWB_RELEASE_APP_CLIENT_ID: ${{ vars.CWB_RELEASE_APP_CLIENT_ID }}
+          CWB_RELEASE_APP_PRIVATE_KEY: ${{ secrets.CWB_RELEASE_APP_PRIVATE_KEY }}
         run: |
-          if [[ -z "$CWB_RELEASE_BYPASS_TOKEN" ]]; then
-            echo "::error::Set CWB_RELEASE_BYPASS_TOKEN to a token for a release actor that can bypass the main branch ruleset."
+          if [[ -z "$CWB_RELEASE_APP_CLIENT_ID" || -z "$CWB_RELEASE_APP_PRIVATE_KEY" ]]; then
+            echo "::error::Set CWB_RELEASE_APP_CLIENT_ID and CWB_RELEASE_APP_PRIVATE_KEY for the release GitHub App."
             exit 1
           fi
+
+      - name: Create release app token
+        id: release-app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.CWB_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CWB_RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            cwb
+            homebrew-tap
+          permission-contents: write
+
+      - name: Resolve release app bot identity
+        id: release-app-identity
+        env:
+          GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
+          APP_SLUG: ${{ steps.release-app-token.outputs.app-slug }}
+        run: |
+          bot_user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+          echo "name=${APP_SLUG}[bot]" >> "$GITHUB_OUTPUT"
+          echo "email=${bot_user_id}+${APP_SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.CWB_RELEASE_BYPASS_TOKEN }}
+          token: ${{ steps.release-app-token.outputs.token }}
           persist-credentials: true
-
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y zsh gh
 
       - name: Run cwb bash tests
         run: bash scripts/test_cwb.sh
 
       - name: Release from main
         env:
-          GH_TOKEN: ${{ secrets.CWB_RELEASE_BYPASS_TOKEN }}
-          HOMEBREW_TAP_PUSH_TOKEN: ${{ secrets.HOMEBREW_TAP_PUSH_TOKEN }}
+          CWB_RELEASE_APP_TOKEN: ${{ steps.release-app-token.outputs.token }}
+          CI_GIT_NAME: ${{ steps.release-app-identity.outputs.name }}
+          CI_GIT_EMAIL: ${{ steps.release-app-identity.outputs.email }}
+          GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
           HOMEBREW_TAP_REPO: cheikhfiteni/homebrew-tap
         run: bash scripts/release_on_main.sh

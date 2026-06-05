@@ -86,11 +86,11 @@ sync_homebrew_tap() {
   local version="$1"
   local sha="$2"
   local tarball_url="https://github.com/${REPO_SLUG}/archive/refs/tags/v${version}.tar.gz"
-  local tap_token="${HOMEBREW_TAP_PUSH_TOKEN:-}"
+  local tap_token="${CWB_RELEASE_APP_TOKEN:-}"
   local tap_dir formula_path clone_url
 
   if [[ -z "$tap_token" ]]; then
-    log "HOMEBREW_TAP_PUSH_TOKEN is not set; skipping tap sync"
+    log "CWB_RELEASE_APP_TOKEN is not set; skipping tap sync"
     return 0
   fi
 
