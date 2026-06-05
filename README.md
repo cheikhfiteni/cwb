@@ -95,6 +95,19 @@ cwb set-wrap-sh -- doppler run --
 cwb clear-wrap-sh
 ```
 
+For example, if Codex is your selected agent:
+
+```bash
+cwb set-default=codex
+CWB_WRAP_SH='doppler run --' cwb fix-auth -- --model gpt-5 "finish auth cleanup"
+```
+
+That launches the worktree normally, then runs the agent as:
+
+```bash
+doppler run -- codex --model gpt-5 "finish auth cleanup"
+```
+
 The wrapper is evaluated as shell immediately before the selected agent, so `doppler run -- codex ...` and `lapdog claude ...` work while cwb still applies agent-specific defaults to `codex` or `claude`. Per-launch precedence is `--wrap-sh`, then `CWB_WRAP_SH`, then the persisted `set-wrap-sh` value. Use `--no-wrap-sh` to bypass env and persisted wrappers for one launch.
 
 ## Flags
