@@ -188,60 +188,6 @@ bash scripts/test_cwb.sh
 
 The suite creates temporary git repos/remotes, stubs the CLI binaries (`claude`/`codex`), and verifies worktree/branch resolution behavior end-to-end.
 
-## CI automation
+## Contributing
 
-- PRs targeting `main` run `.github/workflows/test-cwb.yml`, which executes `bash scripts/test_cwb.sh`.
-- Pushes to `main` run `.github/workflows/release-cwb.yml`, which reruns the same tests and then executes `bash scripts/release_on_main.sh`.
-- The release script is idempotent:
-  - if `HEAD` is already tagged and released, it no-ops,
-  - if `CWB_VERSION` is new, it releases that version,
-  - if the current version was already released on an older commit, it bumps the patch version, commits `release: vx.y.z`, pushes that commit, then tags and releases it.
-- If `main` is protected, allow the release workflow's credential to bypass the direct-push restriction for this automated release commit, or replace `GITHUB_TOKEN` with a bot/App token that has that bypass.
-- To auto-update the Homebrew tap as part of the release, set the repo secret `HOMEBREW_TAP_PUSH_TOKEN` with push access to `cheikhfiteni/homebrew-tap`. Without it, GitHub Releases still publish normally and tap sync is skipped.
-
-## Releasing (maintainers)
-
-cwb uses [Semantic Versioning](https://semver.org). The version lives in `cwb` at `CWB_VERSION="x.y.z"`. The Homebrew formula lives in the separate [`cheikhfiteni/homebrew-tap`](https://github.com/cheikhfiteni/homebrew-tap) repo (a generic tap that hosts all `cheikhfiteni` tools).
-
-**Steps to cut a release:**
-
-1. Update `CWB_VERSION` in `cwb`:
-   ```bash
-   # edit cwb: CWB_VERSION="x.y.z"
-   ```
-
-2. Commit, tag, and push:
-   ```bash
-   git add cwb
-   git commit -m "release: vx.y.z"
-   git tag vx.y.z
-   git push origin main --tags
-   ```
-   GitHub automatically creates a source tarball at:
-   `https://github.com/cheikhfiteni/cwb/archive/refs/tags/vx.y.z.tar.gz`
-
-3. Create a GitHub Release from the tag:
-   ```bash
-   gh release create vx.y.z --title "vx.y.z" --generate-notes
-   ```
-
-4. Compute the SHA256 of the tarball:
-   ```bash
-   curl -sL https://github.com/cheikhfiteni/cwb/archive/refs/tags/vx.y.z.tar.gz | shasum -a 256
-   ```
-
-5. Update `Formula/cwb.rb` in the [`cheikhfiteni/homebrew-tap`](https://github.com/cheikhfiteni/homebrew-tap) repo:
-   ```ruby
-   url "https://github.com/cheikhfiteni/cwb/archive/refs/tags/vx.y.z.tar.gz"
-   sha256 "<output from step 4>"
-   ```
-   A reference copy is kept at `Formula/cwb.rb` in this repo for convenience.
-
-6. Commit and push the tap:
-   ```bash
-   git add Formula/cwb.rb
-   git commit -m "cwb: vx.y.z"
-   git push origin main
-   ```
-
-Users get the update on the next `brew upgrade cheikhfiteni/tap/cwb`.
+Contributor workflow, CI details, and maintainer release steps live in [CONTRIBUTING.md](CONTRIBUTING.md).
