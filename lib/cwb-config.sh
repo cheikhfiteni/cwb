@@ -48,9 +48,20 @@ _cwb_first_existing_worktree_path() {
 _cwb_read_pref_file() {
   local prefs_file="$1" key="$2" default_val="$3"
   [[ -f "$prefs_file" ]] || { printf '%s' "$default_val"; return; }
-  local val
-  val="$(grep "^${key}=" "$prefs_file" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]')"
-  printf '%s' "${val:-$default_val}"
+  local line val="$default_val" found=false
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      "$key="*)
+        val="${line#*=}"
+        found=true
+        ;;
+    esac
+  done < "$prefs_file"
+  if $found; then
+    printf '%s' "$val"
+  else
+    printf '%s' "$default_val"
+  fi
 }
 
 _cwb_read_user_pref() {
@@ -65,8 +76,33 @@ _cwb_write_pref_file() {
   mkdir -p "$(dirname "$prefs_file")"
   local tmpfile
   tmpfile="$(mktemp)"
-  { [[ -f "$prefs_file" ]] && grep -v "^${key}=" "$prefs_file"; } > "$tmpfile" 2>/dev/null || true
+  if [[ -f "$prefs_file" ]]; then
+    local line
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      case "$line" in
+        "$key="*) continue ;;
+      esac
+      printf '%s\n' "$line"
+    done < "$prefs_file" > "$tmpfile"
+  else
+    : > "$tmpfile"
+  fi
   printf '%s=%s\n' "$key" "$val" >> "$tmpfile"
+  mv "$tmpfile" "$prefs_file"
+}
+
+_cwb_delete_pref_file() {
+  local prefs_file="$1" key="$2"
+  [[ -f "$prefs_file" ]] || return 0
+  local tmpfile
+  tmpfile="$(mktemp)"
+  local line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      "$key="*) continue ;;
+    esac
+    printf '%s\n' "$line"
+  done < "$prefs_file" > "$tmpfile"
   mv "$tmpfile" "$prefs_file"
 }
 
@@ -75,6 +111,13 @@ _cwb_write_user_pref() {
   local prefs_file
   prefs_file="$(_cwb_user_prefs_file)" || return 1
   _cwb_write_pref_file "$prefs_file" "$key" "$val"
+}
+
+_cwb_delete_user_pref() {
+  local key="$1"
+  local prefs_file
+  prefs_file="$(_cwb_user_prefs_file)" || return 1
+  _cwb_delete_pref_file "$prefs_file" "$key"
 }
 
 _cwb_bool_is_true() {

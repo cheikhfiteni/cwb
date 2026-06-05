@@ -330,6 +330,25 @@ test_set_default_persists_in_home_directory() {
   assert_contains "$repo_path/.test-cli-calls" "codex|" || return 1
 }
 
+test_pref_parser_preserves_whitespace_values() {
+  local repo_path
+  repo_path="$(setup_repo "prefs-whitespace")"
+
+  mkdir -p "$repo_path/home/.cwb"
+  printf '%s\n' \
+    "USER_WRAP_SH=doppler run --" \
+    "SHARED_FLAG_yolo=on" \
+    > "$repo_path/home/.cwb/.cwb-prefs"
+
+  local output
+  output="$(
+    cd "$repo_path"
+    HOME="$repo_path/home" bash -lc 'source ./lib/cwb-config.sh; _cwb_read_user_pref USER_WRAP_SH ""; printf "\n"; _cwb_read_shared_flag_default yolo'
+  )"
+
+  assert_equals $'doppler run --\non' "$output" || return 1
+}
+
 test_yolo_maps_to_claude_flag() {
   local repo_path
   repo_path="$(setup_repo "claude-yolo")"
@@ -589,6 +608,7 @@ run_test test_remote_only_branch_creates_tracking_worktree
 run_test test_existing_worktree_is_reused_even_if_not_default_path
 run_test test_picker_mode_with_double_dash_selects_typed_name
 run_test test_set_default_persists_in_home_directory
+run_test test_pref_parser_preserves_whitespace_values
 run_test test_yolo_maps_to_claude_flag
 run_test test_interactive_set_defaults_persists_status_and_runtime_flags
 run_test test_no_yolo_overrides_persisted_default
