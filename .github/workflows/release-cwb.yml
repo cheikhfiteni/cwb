@@ -18,10 +18,20 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Validate release bypass token
+        env:
+          CWB_RELEASE_BYPASS_TOKEN: ${{ secrets.CWB_RELEASE_BYPASS_TOKEN }}
+        run: |
+          if [[ -z "$CWB_RELEASE_BYPASS_TOKEN" ]]; then
+            echo "::error::Set CWB_RELEASE_BYPASS_TOKEN to a token for a release actor that can bypass the main branch ruleset."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.CWB_RELEASE_BYPASS_TOKEN }}
           persist-credentials: true
 
       - name: Install dependencies
@@ -32,7 +42,7 @@ jobs:
 
       - name: Release from main
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CWB_RELEASE_BYPASS_TOKEN }}
           HOMEBREW_TAP_PUSH_TOKEN: ${{ secrets.HOMEBREW_TAP_PUSH_TOKEN }}
           HOMEBREW_TAP_REPO: cheikhfiteni/homebrew-tap
         run: bash scripts/release_on_main.sh
