@@ -78,16 +78,32 @@ cwb fix-auth                     # named worktree on branch cwb/fix-auth
 cwb fix-auth "add logout button" # pass a prompt to the CLI
 cwb -- "continue refactor"       # open interactive picker, then pass prompt
 cwb fix-auth --tmux              # run in a new tmux session
+cwb fix-auth --wrap-sh "doppler run --" # run doppler only around the selected agent
 cwb fix-auth --copy-volumes=false # skip Docker volume isolation
 ```
 
 Everything after the optional name and cwb-specific flags is forwarded to the selected CLI (Claude Code or Codex).
+
+## Agent wrappers
+
+Use `CWB_WRAP_SH` or `--wrap-sh` when the selected agent command needs to run through another shell command, without wrapping `cwb` itself:
+
+```bash
+CWB_WRAP_SH='doppler run --' cwb fix-auth
+cwb fix-auth --wrap-sh 'lapdog'
+cwb set-wrap-sh -- doppler run --
+cwb clear-wrap-sh
+```
+
+The wrapper is evaluated as shell immediately before the selected agent, so `doppler run -- codex ...` and `lapdog claude ...` work while cwb still applies agent-specific defaults to `codex` or `claude`. Per-launch precedence is `--wrap-sh`, then `CWB_WRAP_SH`, then the persisted `set-wrap-sh` value. Use `--no-wrap-sh` to bypass env and persisted wrappers for one launch.
 
 ## Flags
 
 | Flag | Default | Description |
 |---|---|---|
 | `--tmux` | off | Run the CLI in a new tmux session (`cwb-<name>`) |
+| `--wrap-sh <shell>` | unset | Prefix the selected agent with a shell fragment for one launch |
+| `--no-wrap-sh` | unset | Ignore `CWB_WRAP_SH` and any persisted wrapper for one launch |
 | `--copy-volumes=true\|false` | `true` | Prefix Docker named volumes with worktree name for isolation |
 
 ## What it does

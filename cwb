@@ -8,6 +8,7 @@
 #   cwb --new                                     # force a new random branch/worktree
 #   cwb fix-auth                                  # named branch/worktree
 #   cwb fix-auth --tmux --yolo -- --model gpt-5   # cwb flags + forwarded CLI flags
+#   CWB_WRAP_SH='doppler run --' cwb fix-auth      # wrap only the selected agent command
 #   cwb fix-auth --copy-volumes=false             # skip docker-compose volume isolation
 #
 # Flags (consumed by cwb, not forwarded to the CLI):
@@ -18,6 +19,8 @@
 #   --copy-volumes=true     prefix docker named volumes with worktree name (default: true)
 #   --copy-volumes=false    skip volume isolation
 #   --no-mcp                disable project MCP servers in this worktree session
+#   --wrap-sh <shell>       wrap the selected agent with a shell fragment for this launch
+#   --no-wrap-sh            ignore CWB_WRAP_SH and persisted wrapper for this launch
 #   --new                   force a new random branch instead of opening the picker
 #   --set-defaults          interactively set shared defaults
 #   --help                  print cwb help and exit
@@ -31,6 +34,8 @@
 # Commands:
 #   cwb set-default=claude             use claude as the default CLI (default)
 #   cwb set-default=codex              use codex as the default CLI
+#   cwb set-wrap-sh <shell>            persist a shell wrapper for the selected agent
+#   cwb clear-wrap-sh                  clear the persisted shell wrapper
 #   cwb cwb-setup [-- <agent args>]     open the repo-setup worktree; pass -- to override default prompt
 #   cwb --set-defaults                 interactively set shared defaults
 

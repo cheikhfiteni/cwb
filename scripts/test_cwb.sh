@@ -514,8 +514,25 @@ test_status_prints_version_and_preferences() {
   [[ "$output" == *"Version: $CURRENT_VERSION"* ]] || fail "Expected version in status output" || return 1
   [[ "$output" == *"Preferences file: $repo_path/home/.cwb/.cwb-prefs"* ]] || fail "Expected prefs path in status output" || return 1
   [[ "$output" == *"Default CLI: codex"* ]] || fail "Expected default CLI in status output" || return 1
+  [[ "$output" == *"Wrapper shell: <none>"* ]] || fail "Expected empty wrapper in status output" || return 1
   [[ "$output" == *"Shared default [tmux]: off"* ]] || fail "Expected tmux shared default in status output" || return 1
   [[ "$output" == *"Shared default [yolo]: off"* ]] || fail "Expected yolo shared default in status output" || return 1
+}
+
+test_status_prints_wrap_sh_pref_and_env_override() {
+  local repo_path
+  repo_path="$(setup_repo "status-wrap-sh")"
+
+  run_cwb "$repo_path" set-wrap-sh "doppler run --" >/dev/null
+
+  local output
+  output="$(run_cwb "$repo_path" --status)"
+  [[ "$output" == *"Wrapper shell: doppler run --"* ]] || fail "Expected persisted wrapper in status output" || return 1
+  [[ "$output" == *"Wrapper shell source: prefs"* ]] || fail "Expected wrapper prefs source in status output" || return 1
+
+  output="$(run_cwb_with_wrap_sh "$repo_path" "lapdog" --status)"
+  [[ "$output" == *"Wrapper shell: lapdog"* ]] || fail "Expected env wrapper in status output" || return 1
+  [[ "$output" == *"Wrapper shell source: CWB_WRAP_SH"* ]] || fail "Expected wrapper env source in status output" || return 1
 }
 
 test_help_is_non_interactive_and_does_not_launch_cli() {
@@ -527,6 +544,8 @@ test_help_is_non_interactive_and_does_not_launch_cli() {
 
   [[ "$output" == *"High-level wrapper around coding-agent CLIs"* ]] || fail "Expected help summary in output" || return 1
   [[ "$output" == *"--set-defaults"* ]] || fail "Expected set-defaults flag in help output" || return 1
+  [[ "$output" == *"--wrap-sh"* ]] || fail "Expected wrap-sh flag in help output" || return 1
+  [[ "$output" == *"CWB_WRAP_SH='doppler run --'"* ]] || fail "Expected CWB_WRAP_SH example in help output" || return 1
   [[ "$output" == *"cwb cwb-setup"* ]] || fail "Expected cwb-setup command in help output" || return 1
   assert_file_not_exists "$repo_path/.test-cli-calls" || return 1
   local worktree_count
@@ -706,6 +725,7 @@ run_test test_interactive_set_defaults_persists_status_and_runtime_flags
 run_test test_no_yolo_overrides_persisted_default
 run_test test_set_defaults_requires_interactive_terminal
 run_test test_status_prints_version_and_preferences
+run_test test_status_prints_wrap_sh_pref_and_env_override
 run_test test_help_is_non_interactive_and_does_not_launch_cli
 run_test test_reserved_cwb_setup_uses_repo_setup_prompt
 run_test test_reserved_cwb_setup_keeps_passthrough_args
