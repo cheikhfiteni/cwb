@@ -78,23 +78,23 @@ assert_symlink_target() {
 setup_repo() {
   local repo_name="$1"
   local repo_path="$TEST_TMP_ROOT/$repo_name"
+  local install_path="${repo_path}-cwb-install"
 
   mkdir -p "$repo_path"
   git -C "$repo_path" init -b main >/dev/null
   git -C "$repo_path" config user.email "cwb-tests@example.com"
   git -C "$repo_path" config user.name "CWB Tests"
 
-  cp "$SOURCE_ROOT/cwb" "$repo_path/cwb"
-  chmod +x "$repo_path/cwb"
-  mkdir -p "$repo_path/lib" "$repo_path/lib/setup" \
-    "$repo_path/scripts/cwb/lib/lifecycle"
-  cp "$SOURCE_ROOT/lib/setup/cwb-repo-setup.md" "$repo_path/lib/setup/cwb-repo-setup.md"
-  cp "$SOURCE_ROOT/lib/cwb-config.sh" "$repo_path/lib/cwb-config.sh"
-  cp "$SOURCE_ROOT/lib/cwb-status.sh" "$repo_path/lib/cwb-status.sh"
+  mkdir -p "$install_path/lib/setup" "$install_path/lib/lifecycle"
+  cp "$SOURCE_ROOT/cwb" "$install_path/cwb"
+  chmod +x "$install_path/cwb"
+  cp "$SOURCE_ROOT/lib/setup/cwb-repo-setup.md" "$install_path/lib/setup/cwb-repo-setup.md"
+  cp "$SOURCE_ROOT/lib/cwb-config.sh" "$install_path/lib/cwb-config.sh"
+  cp "$SOURCE_ROOT/lib/cwb-status.sh" "$install_path/lib/cwb-status.sh"
 
   mkdir -p "$repo_path/.cwb/worktrees" "$repo_path/.claude/worktrees" "$repo_path/bin" "$repo_path/home"
 
-  cat > "$repo_path/scripts/cwb/lib/lifecycle/cwb-worktree-env.sh" <<'ENV_SCRIPT'
+  cat > "$install_path/lib/lifecycle/cwb-worktree-env.sh" <<'ENV_SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
 repo_root="$1"
@@ -103,9 +103,9 @@ worktree_name="${3:-}"
 copy_volumes="${4:-}"
 echo "${worktree_path}|${worktree_name}|${copy_volumes}" >> "$repo_root/.test-env-calls"
 ENV_SCRIPT
-  chmod +x "$repo_path/scripts/cwb/lib/lifecycle/cwb-worktree-env.sh"
+  chmod +x "$install_path/lib/lifecycle/cwb-worktree-env.sh"
 
-  cat > "$repo_path/scripts/cwb/lib/lifecycle/cwb-cleanup.sh" <<'CLEANUP_SCRIPT'
+  cat > "$install_path/lib/lifecycle/cwb-cleanup.sh" <<'CLEANUP_SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
 worktree_path="$1"
@@ -114,7 +114,7 @@ branch_name="$3"
 repo_root="$4"
 echo "${worktree_path}|${initial_commit}|${branch_name}|${repo_root}" >> "$repo_root/.test-cleanup-calls"
 CLEANUP_SCRIPT
-  chmod +x "$repo_path/scripts/cwb/lib/lifecycle/cwb-cleanup.sh"
+  chmod +x "$install_path/lib/lifecycle/cwb-cleanup.sh"
 
   cat > "$repo_path/bin/claude" <<'CLAUDE_BIN'
 #!/usr/bin/env bash
@@ -198,7 +198,7 @@ TMUX_BIN
 # temp test repo
 README
 
-  git -C "$repo_path" add README.md scripts cwb lib
+  git -C "$repo_path" add README.md
   git -C "$repo_path" commit -m "init" >/dev/null
 
   echo "$repo_path"
@@ -220,9 +220,10 @@ run_cwb_with_env() {
       PATH="$repo_path/bin:$PATH" \
       HOME="$repo_path/home" \
       CWB_TEST_LOG="$repo_path/.test-cli-calls" \
+      CWB_TEST_CWB_PATH="${repo_path}-cwb-install/cwb" \
       CWB_NO_UPDATE_CHECK=1 \
       ${extra_env:+$extra_env} \
-      bash -lc 'source ./cwb; cwb "$@"' bash "$@"
+      bash -lc 'source "$CWB_TEST_CWB_PATH"; cwb "$@"' bash "$@"
   )
 }
 
@@ -236,9 +237,10 @@ run_cwb_with_wrap_sh() {
       PATH="$repo_path/bin:$PATH" \
       HOME="$repo_path/home" \
       CWB_TEST_LOG="$repo_path/.test-cli-calls" \
+      CWB_TEST_CWB_PATH="${repo_path}-cwb-install/cwb" \
       CWB_WRAP_SH="$wrap_sh" \
       CWB_NO_UPDATE_CHECK=1 \
-      bash -lc 'source ./cwb; cwb "$@"' bash "$@"
+      bash -lc 'source "$CWB_TEST_CWB_PATH"; cwb "$@"' bash "$@"
   )
 }
 
@@ -252,9 +254,10 @@ run_cwb_with_input() {
       PATH="$repo_path/bin:$PATH" \
       HOME="$repo_path/home" \
       CWB_TEST_LOG="$repo_path/.test-cli-calls" \
+      CWB_TEST_CWB_PATH="${repo_path}-cwb-install/cwb" \
       CWB_TEST_INTERACTIVE=1 \
       CWB_NO_UPDATE_CHECK=1 \
-      bash -lc 'source ./cwb; cwb "$@"' bash "$@"
+      bash -lc 'source "$CWB_TEST_CWB_PATH"; cwb "$@"' bash "$@"
   )
 }
 
@@ -402,7 +405,7 @@ test_pref_parser_preserves_whitespace_values() {
   local output
   output="$(
     cd "$repo_path"
-    HOME="$repo_path/home" bash -lc 'source ./lib/cwb-config.sh; _cwb_read_user_pref USER_WRAP_SH ""; printf "\n"; _cwb_read_shared_flag_default yolo'
+    HOME="$repo_path/home" bash -lc "source '${repo_path}-cwb-install/lib/cwb-config.sh'; _cwb_read_user_pref USER_WRAP_SH ''; printf '\n'; _cwb_read_shared_flag_default yolo"
   )"
 
   assert_equals $'doppler run --\non' "$output" || return 1
@@ -581,7 +584,8 @@ test_update_check_refreshes_stale_cache_and_suggests_brew_update() {
       PATH="$repo_path/bin:$PATH" \
       HOME="$repo_path/home" \
       CWB_TEST_CURL_RESPONSE="{\"tag_name\":\"v${next_version}\"}" \
-      bash -c 'source ./cwb; _cwb_check_for_update'
+      CWB_TEST_CWB_PATH="${repo_path}-cwb-install/cwb" \
+      bash -c 'source "$CWB_TEST_CWB_PATH"; _cwb_check_for_update'
   )"
 
   [[ "$output" == *"Update available: v$CURRENT_VERSION"* ]] || fail "Expected update notification" || return 1
@@ -605,8 +609,9 @@ test_update_prompt_can_continue_without_updating() {
       PATH="$repo_path/bin:$PATH" \
       HOME="$repo_path/home" \
       CWB_TEST_LOG="$repo_path/.test-cli-calls" \
+      CWB_TEST_CWB_PATH="${repo_path}-cwb-install/cwb" \
       CWB_TEST_INTERACTIVE=1 \
-      bash -lc 'source ./cwb; cwb alpha' 2>&1
+      bash -lc 'source "$CWB_TEST_CWB_PATH"; cwb alpha' 2>&1
   )"
 
   [[ "$output" == *"Update available: v$CURRENT_VERSION"* ]] || fail "Expected update notification" || return 1
@@ -631,8 +636,9 @@ test_update_prompt_runs_upgrade_and_exits_before_launching_agent() {
       PATH="$repo_path/bin:$PATH" \
       HOME="$repo_path/home" \
       CWB_TEST_LOG="$repo_path/.test-cli-calls" \
+      CWB_TEST_CWB_PATH="${repo_path}-cwb-install/cwb" \
       CWB_TEST_INTERACTIVE=1 \
-      bash -lc 'source ./cwb; cwb alpha' 2>&1
+      bash -lc 'source "$CWB_TEST_CWB_PATH"; cwb alpha' 2>&1
   )"
 
   [[ "$output" == *"Update available: v$CURRENT_VERSION"* ]] || fail "Expected update notification" || return 1
@@ -667,7 +673,7 @@ test_sourced_cwb_function_is_small_wrapper() {
   local repo_path output
   repo_path="$(setup_repo "small-wrapper")"
 
-  output="$(cd "$repo_path" && HOME="$repo_path/home" bash -lc 'source ./cwb; declare -f cwb')"
+  output="$(cd "$repo_path" && HOME="$repo_path/home" CWB_TEST_CWB_PATH="${repo_path}-cwb-install/cwb" bash -lc 'source "$CWB_TEST_CWB_PATH"; declare -f cwb')"
 
   [[ "$output" == *'_cwb_main "$@"'* ]] || fail "Expected cwb function to call _cwb_main" || return 1
   [[ "$output" != *"git worktree add"* ]] || fail "Expected cwb function wrapper not full implementation" || return 1
@@ -699,7 +705,11 @@ test_zsh_source_wrapper_loads_help_helpers() {
   repo_path="$(setup_repo "zsh-source-wrapper")"
 
   local output
-  output="$(cd "$repo_path" && HOME="$repo_path/home" zsh -lc '. ./cwb && cwb --help | sed -n "1,6p"')"
+  output="$(
+    cd "$repo_path"
+    HOME="$repo_path/home" CWB_TEST_CWB_PATH="${repo_path}-cwb-install/cwb" \
+      zsh -lc '. "$CWB_TEST_CWB_PATH" && cwb --help | sed -n "1,6p"'
+  )"
 
   [[ "$output" == *"cwb $CURRENT_VERSION"* ]] || fail "Expected cwb version in zsh-sourced help output" || return 1
   [[ "$output" == *"High-level wrapper around coding-agent CLIs"* ]] || fail "Expected help summary in zsh-sourced help output" || return 1
@@ -712,7 +722,7 @@ test_zshrc_source_uses_sourced_file_dir() {
   mkdir -p "$outside_dir"
 
   cat > "$repo_path/home/.zshrc" <<EOF
-source "$repo_path/cwb"
+source "${repo_path}-cwb-install/cwb"
 EOF
 
   local output

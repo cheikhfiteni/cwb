@@ -132,7 +132,7 @@ The wrapper is evaluated as shell immediately before the selected agent, so `dop
    - Symlinks `.env` files from the main repo into the worktree.
    - Creates `.env.local` stubs for worktree-specific overrides (ports, API URLs), auto-selecting free localhost ports for common `web/` runtimes.
    - Writes `docker-compose.override.yml` + `COMPOSE_PROJECT_NAME` to isolate Docker volumes per worktree.
-   - Regenerates Python and iOS proto bindings when the repo provides compile scripts.
+   - Runs the repository's optional `.cwb/hooks/post-worktree-setup.sh` hook.
 5. **Launches the selected CLI** (Claude Code or Codex) inside the worktree directory.
 6. **Cleans up only newly created empty worktrees** via `lib/lifecycle/cwb-cleanup.sh`.
 
@@ -177,6 +177,23 @@ This ensures parallel worktrees never share databases or state. Pass `--copy-vol
 - **Active worktree with changes:** kept after the CLI exits. Resume with `cd .cwb/worktrees/<name>`.
 - **Clean worktree (no changes):** automatically removed along with its branch.
 - **Merged into main:** pruned automatically the next time any `cwb` command runs.
+
+### Post-setup hook
+
+Repositories can add `.cwb/hooks/post-worktree-setup.sh` for dependency
+installation or other project-specific setup. cwb runs it after preparing every
+new or reused worktree, passing the worktree path and repository root as the
+first two arguments. For example:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+worktree_path="$1"
+(cd "$worktree_path/frontend" && npm install)
+```
+
+Hook failures are reported but do not prevent the coding agent from starting.
 
 ## Testing
 

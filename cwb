@@ -1,7 +1,7 @@
 # cwb - Claude Worktree Branch
 # Like `claude -w` but branches off your current branch instead of the default branch.
 #
-# Setup: source /path/to/repo/cwb in your shell profile — see scripts/cwb/CWB.md.
+# Setup: source /path/to/cwb/cwb in your shell profile — see README.md.
 #
 # Usage:
 #   cwb                                           # picker in interactive shells; random branch otherwise
@@ -722,7 +722,7 @@ _cwb_main() {
 
   # Set up .env symlinks, .env.local stubs, and docker-compose volume isolation.
   # Existing worktrees may prompt for overwrite when rerun interactively.
-  local env_script="$repo_root/scripts/cwb/lib/lifecycle/cwb-worktree-env.sh"
+  local env_script="$CWB_SCRIPT_DIR/lib/lifecycle/cwb-worktree-env.sh"
   if [[ -f "$env_script" ]]; then
     bash "$env_script" "$repo_root" "$worktree_path" "$name" "$copy_volumes" || echo "[cwb] Warning: env setup script failed"
   fi
@@ -735,7 +735,7 @@ _cwb_main() {
   local initial_commit
   initial_commit="$(git -C "$worktree_path" rev-parse HEAD 2>/dev/null || true)"
 
-  local cleanup_script="$repo_root/scripts/cwb/lib/lifecycle/cwb-cleanup.sh"
+  local cleanup_script="$CWB_SCRIPT_DIR/lib/lifecycle/cwb-cleanup.sh"
   local lockfile="$worktree_path/.cwb.lock"
 
   if [[ -n "$wrap_sh" ]]; then

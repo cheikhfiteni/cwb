@@ -2,7 +2,7 @@
 # cwb-worktree-env.sh — Symlink shared .env files into a new worktree and
 # create .env.local stubs for worktree-specific overrides.
 #
-# Usage: bash scripts/cwb/lib/lifecycle/cwb-worktree-env.sh <repo_root> <worktree_path> [worktree_name] [copy_volumes]
+# Usage: bash lib/lifecycle/cwb-worktree-env.sh <repo_root> <worktree_path> [worktree_name] [copy_volumes]
 #
 #   worktree_name  Name of the worktree (used for Docker volume isolation).
 #                  Defaults to basename of worktree_path.
@@ -314,7 +314,7 @@ create_env_local_stub() {
 # services independently (e.g. on different ports) without conflicting with
 # other worktrees or the main dev environment.
 #
-# Edit as needed. Use `bash scripts/cwb/lib/lifecycle/cwb-compose.sh ...` for Docker Compose
+# Edit as needed. Use cwb's `lib/lifecycle/cwb-compose.sh` for Docker Compose
 # commands so the cwb layer exports these overrides before Compose evaluates the file.
 #
 # Example overrides:

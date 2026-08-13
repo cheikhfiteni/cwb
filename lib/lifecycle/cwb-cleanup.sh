@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # cwb-cleanup.sh — Evaluate whether a cwb worktree has changes and clean up if not.
 #
-# Usage: bash scripts/cwb/lib/lifecycle/cwb-cleanup.sh <worktree_path> <initial_commit> <branch_name> <repo_root>
+# Usage: bash lib/lifecycle/cwb-cleanup.sh <worktree_path> <initial_commit> <branch_name> <repo_root>
 #
 # Called by cwb() after claude exits (both tmux and non-tmux paths).
 # Keeps the worktree if there are commits, uncommitted changes, or a detached HEAD.
