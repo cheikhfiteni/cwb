@@ -86,8 +86,9 @@ _cwb_prune_merged() {
   # Determine the merge target branch. Defaults to main; override via env var.
   local merge_target="${CWB_MERGE_TARGET_BRANCH:-main}"
 
-  # Fetch the merge target to check for merged branches (suppress output to avoid noise)
-  git fetch origin "$merge_target" --quiet 2>/dev/null || return 0
+  # Keep launch latency independent of the network. Pruning is best-effort and
+  # uses the latest remote-tracking state already available in this clone.
+  git show-ref --verify --quiet "refs/remotes/origin/$merge_target" || return 0
 
   # Find and clean up cwb branches that have been merged into the merge target
   local branch wt_name wt_path legacy_path

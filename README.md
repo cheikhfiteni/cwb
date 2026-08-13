@@ -121,7 +121,7 @@ The wrapper is evaluated as shell immediately before the selected agent, so `dop
 
 ## What it does
 
-1. **Prunes merged branches** — removes any `cwb/*` branches already merged into `origin/main`.
+1. **Prunes known merged branches** — removes any `cwb/*` branches merged into the locally available `origin/main` state without blocking startup on a network fetch.
 2. **Resolves branch/worktree target**:
    - if a worktree already exists for `cwb/<name>`, reuse it.
    - if local `cwb/<name>` exists, create a worktree from that branch.

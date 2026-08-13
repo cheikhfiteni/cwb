@@ -274,6 +274,21 @@ DOPPLER_BIN
   chmod +x "$repo_path/bin/doppler"
 }
 
+write_git_fetch_logging_stub() {
+  local repo_path="$1"
+  local real_git
+  real_git="$(command -v git)"
+  cat > "$repo_path/bin/git" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "fetch" ]]; then
+  echo "git|\$*" >> "\${CWB_TEST_LOG:?missing CWB_TEST_LOG}"
+fi
+exec "$real_git" "\$@"
+EOF
+  chmod +x "$repo_path/bin/git"
+}
+
 run_env_setup() {
   local repo_path="$1"
   local worktree_path="$2"
@@ -307,6 +322,26 @@ test_new_branch_creates_worktree_and_runs_cleanup() {
   assert_contains "$repo_path/.test-cli-calls" "claude|" || return 1
   assert_contains "$repo_path/.test-cli-calls" "/.cwb/worktrees/alpha|" || return 1
   assert_contains "$repo_path/.test-cleanup-calls" "cwb/alpha" || return 1
+}
+
+test_startup_prunes_known_merges_without_fetching() {
+  local repo_path
+  repo_path="$(setup_repo "local-only-pruning")"
+  local remote_path="$TEST_TMP_ROOT/local-only-pruning.git"
+
+  git init --bare "$remote_path" >/dev/null
+  git -C "$repo_path" remote add origin "$remote_path"
+  git -C "$repo_path" push -u origin main >/dev/null
+  git -C "$repo_path" branch cwb/already-merged
+  write_git_fetch_logging_stub "$repo_path"
+
+  run_cwb "$repo_path" alpha --no-tmux >/dev/null
+
+  if git -C "$repo_path" show-ref --verify --quiet refs/heads/cwb/already-merged; then
+    fail "Expected the locally known merged branch to be pruned"
+    return 1
+  fi
+  assert_not_contains "$repo_path/.test-cli-calls" "git|fetch" || return 1
 }
 
 test_existing_local_branch_skips_cleanup() {
@@ -871,6 +906,7 @@ test_yolo_maps_to_agent_flag() {
 }
 
 run_test test_new_branch_creates_worktree_and_runs_cleanup
+run_test test_startup_prunes_known_merges_without_fetching
 run_test test_existing_local_branch_skips_cleanup
 run_test test_remote_only_branch_creates_tracking_worktree
 run_test test_existing_worktree_is_reused_even_if_not_default_path
