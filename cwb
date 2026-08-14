@@ -30,6 +30,7 @@
 # Preferences:
 #   ~/.cwb/.cwb-prefs                  personal preferences and shared defaults
 #   <repo>/.cwb/worktrees/             repo-local cwb worktrees
+#   <repo>/.cwb/merge-target           optional tracked pruning target branch
 #
 # Commands:
 #   cwb set-default=claude             use claude as the default CLI (default)
@@ -91,49 +92,131 @@ _cwb_refresh_merge_target_async() {
   )
 }
 
+_cwb_trim_whitespace() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+_cwb_valid_merge_target() {
+  local merge_target="$1"
+  [[ -n "$merge_target" ]] && git check-ref-format --branch "$merge_target" >/dev/null 2>&1
+}
+
+_cwb_resolve_merge_target() {
+  local repo_root="$1"
+  local merge_target=""
+  local merge_target_file="$repo_root/.cwb/merge-target"
+
+  if [[ -n "${CWB_MERGE_TARGET_BRANCH:-}" ]]; then
+    merge_target="$(_cwb_trim_whitespace "$CWB_MERGE_TARGET_BRANCH")"
+    if _cwb_valid_merge_target "$merge_target"; then
+      printf '%s' "$merge_target"
+      return 0
+    fi
+    echo "[cwb] Ignoring invalid CWB_MERGE_TARGET_BRANCH: $CWB_MERGE_TARGET_BRANCH" >&2
+  fi
+
+  if [[ -f "$merge_target_file" ]]; then
+    merge_target="$(_cwb_trim_whitespace "$(cat "$merge_target_file" 2>/dev/null)")"
+    if _cwb_valid_merge_target "$merge_target"; then
+      printf '%s' "$merge_target"
+      return 0
+    fi
+    echo "[cwb] Ignoring invalid merge target in $merge_target_file" >&2
+  fi
+
+  printf '%s' "main"
+}
+
+_cwb_worktree_dirty() {
+  local worktree_path="$1"
+  local worktree_status
+
+  [[ -d "$worktree_path" ]] || return 1
+  worktree_status="$(git -C "$worktree_path" status --porcelain 2>/dev/null)" || return 0
+  [[ -n "$worktree_status" ]]
+}
+
 _cwb_prune_known_merged() {
   local repo_root="$1"
   local merge_target="$2"
 
-  git show-ref --verify --quiet "refs/remotes/origin/$merge_target" || return 0
+  git -C "$repo_root" show-ref --verify --quiet "refs/remotes/origin/$merge_target" || return 0
 
-  local branch wt_name wt_path legacy_path
-  for branch in $(git for-each-ref --format='%(refname:short)' refs/heads/cwb/ 2>/dev/null); do
-    if git merge-base --is-ancestor "$branch" "origin/$merge_target" 2>/dev/null; then
-      wt_name="${branch#cwb/}"
-      wt_path="$(_cwb_default_worktree_path "$repo_root" "$wt_name")"
-      legacy_path="$(_cwb_legacy_worktree_path "$repo_root" "$wt_name")"
+  local branch registered_path wt_name wt_path legacy_path
+  while IFS=$'\t' read -r branch registered_path; do
+    [[ -n "$branch" ]] || continue
+    wt_name="${branch#cwb/}"
+    wt_path="$(_cwb_default_worktree_path "$repo_root" "$wt_name")"
+    legacy_path="$(_cwb_legacy_worktree_path "$repo_root" "$wt_name")"
 
-      # Skip worktrees with an active session
-      if _cwb_session_alive "$wt_path/.cwb.lock"; then
-        echo "[cwb] Skipping $branch — session still active"
-        continue
-      fi
-      if _cwb_session_alive "$legacy_path/.cwb.lock"; then
-        echo "[cwb] Skipping $branch — legacy session still active"
-        continue
-      fi
-
-      if [[ -d "$wt_path" ]]; then
-        echo "[cwb] Branch $branch merged into $merge_target — cleaning up worktree"
-        git worktree remove --force "$wt_path" 2>/dev/null
-      fi
-      if [[ -d "$legacy_path" ]]; then
-        echo "[cwb] Branch $branch merged into $merge_target — cleaning up legacy worktree"
-        git worktree remove --force "$legacy_path" 2>/dev/null
-      fi
-      echo "[cwb] Removing merged branch $branch"
-      git branch -D "$branch" 2>/dev/null
+    # Skip worktrees with an active session.
+    if _cwb_session_alive "$wt_path/.cwb.lock"; then
+      echo "[cwb] Skipping $branch — session still active"
+      continue
     fi
-  done
+    if _cwb_session_alive "$legacy_path/.cwb.lock"; then
+      echo "[cwb] Skipping $branch — legacy session still active"
+      continue
+    fi
+    if [[ -n "$registered_path" && "$registered_path" != "$wt_path" && "$registered_path" != "$legacy_path" ]] && \
+       _cwb_session_alive "$registered_path/.cwb.lock"; then
+      echo "[cwb] Skipping $branch — session still active in $registered_path"
+      continue
+    fi
+
+    # Merged branches can still contain local work that has not been committed.
+    # Never force-remove such a worktree or its branch.
+    if _cwb_worktree_dirty "$wt_path"; then
+      echo "[cwb] Skipping $branch — worktree has uncommitted changes"
+      continue
+    fi
+    if _cwb_worktree_dirty "$legacy_path"; then
+      echo "[cwb] Skipping $branch — legacy worktree has uncommitted changes"
+      continue
+    fi
+    if [[ -n "$registered_path" && "$registered_path" != "$wt_path" && "$registered_path" != "$legacy_path" ]] && \
+       _cwb_worktree_dirty "$registered_path"; then
+      echo "[cwb] Skipping $branch — worktree has uncommitted changes: $registered_path"
+      continue
+    fi
+
+    # cwb only owns worktrees in its current and legacy managed roots. Git
+    # already refused to delete branches checked out elsewhere; make that
+    # protection explicit instead of attempting a force-delete.
+    if [[ -n "$registered_path" && "$registered_path" != "$wt_path" && "$registered_path" != "$legacy_path" ]]; then
+      echo "[cwb] Skipping $branch — worktree is outside cwb managed paths: $registered_path"
+      continue
+    fi
+
+    if [[ -d "$wt_path" ]]; then
+      echo "[cwb] Branch $branch merged into $merge_target — cleaning up worktree"
+      git -C "$repo_root" worktree remove --force "$wt_path" 2>/dev/null
+    fi
+    if [[ -d "$legacy_path" ]]; then
+      echo "[cwb] Branch $branch merged into $merge_target — cleaning up legacy worktree"
+      git -C "$repo_root" worktree remove --force "$legacy_path" 2>/dev/null
+    fi
+    echo "[cwb] Removing merged branch $branch"
+    git -C "$repo_root" branch -D "$branch" 2>/dev/null
+  done < <(
+    git -C "$repo_root" for-each-ref \
+      --merged="refs/remotes/origin/$merge_target" \
+      --format='%(refname:short)%09%(worktreepath)' \
+      refs/heads/cwb/ 2>/dev/null
+  )
 }
 
 _cwb_prune_merged() {
   local repo_root
   repo_root="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)" || return 1
 
-  # Determine the merge target branch. Defaults to main; override via env var.
-  local merge_target="${CWB_MERGE_TARGET_BRANCH:-main}"
+  # Determine the merge target branch from the environment, repository config,
+  # or the default, in that order.
+  local merge_target
+  merge_target="$(_cwb_resolve_merge_target "$repo_root")"
 
   # Prune from local knowledge, then refresh in the background so the next
   # launch observes newer merges without network latency on time-to-agent.
