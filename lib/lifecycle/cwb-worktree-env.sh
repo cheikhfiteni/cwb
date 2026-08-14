@@ -51,11 +51,14 @@ env_files=()
 while IFS= read -r line; do
   env_files+=("$line")
 done < <(
-  find "$repo_root" -name ".env" \( -type f -o -type l \) \
-    -not -path "$repo_root/.claude/worktrees/*" \
-    -not -path "$repo_root/.git/*" \
-    -not -path "*/node_modules/*" \
-    -not -path "*/.venv/*" \
+  find "$repo_root" \
+    \( -path "$repo_root/.cwb/worktrees" \
+       -o -path "$repo_root/.claude/worktrees" \
+       -o -name ".git" \
+       -o -name "node_modules" \
+       -o -name ".venv" \) \
+    -prune \
+    -o -name ".env" \( -type f -o -type l \) -print \
     | sed "s|^$repo_root/||" \
     | sort
 )
@@ -471,12 +474,11 @@ OVERRIDE
     fi
   done < <(
     find "$worktree_path" \
-      \( -name "docker-compose*.yml" -o -name "docker-compose*.yaml" \
-         -o -name "compose.yml"      -o -name "compose.yaml" \) \
-      -not -name "docker-compose.override.yml" \
-      -not -path "*/node_modules/*" \
-      -not -path "*/.venv/*" \
-      -not -path "*/.git/*" \
+      \( -name ".git" -o -name "node_modules" -o -name ".venv" \) \
+      -prune \
+      -o \( -name "docker-compose*.yml" -o -name "docker-compose*.yaml" \
+             -o -name "compose.yml"      -o -name "compose.yaml" \) \
+      -not -name "docker-compose.override.yml" -print \
       | xargs -I{} dirname {} \
       | sort -u
   )

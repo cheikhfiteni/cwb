@@ -330,7 +330,9 @@ run_env_setup() {
   local copy_volumes="${4:-true}"
   (
     cd "$repo_path"
-    bash "$SOURCE_ROOT/lib/lifecycle/cwb-worktree-env.sh" "$repo_path" "$worktree_path" "$worktree_name" "$copy_volumes"
+    PATH="$repo_path/bin:$PATH" \
+    CWB_TEST_LOG="$repo_path/.test-cli-calls" \
+      bash "$SOURCE_ROOT/lib/lifecycle/cwb-worktree-env.sh" "$repo_path" "$worktree_path" "$worktree_name" "$copy_volumes"
   )
 }
 
@@ -367,6 +369,7 @@ test_startup_prunes_cached_merges_without_waiting_for_refresh() {
   git -C "$repo_path" remote add origin "$remote_path"
   git -C "$repo_path" push -u origin main >/dev/null
   git -C "$repo_path" branch cwb/already-merged
+  git -C "$repo_path" branch cwb/also-merged
   configure_gated_upload_pack "$repo_path"
 
   run_cwb "$repo_path" alpha --no-tmux >/dev/null &
@@ -391,6 +394,93 @@ test_startup_prunes_cached_merges_without_waiting_for_refresh() {
     fail "Expected the cached merged branch to be pruned"
     return 1
   fi
+  if git -C "$repo_path" show-ref --verify --quiet refs/heads/cwb/also-merged; then
+    fail "Expected every cached merged branch to be pruned"
+    return 1
+  fi
+  assert_contains "$SOURCE_ROOT/cwb" "--merged=\"refs/remotes/origin/\$merge_target\"" || return 1
+  assert_not_contains "$SOURCE_ROOT/cwb" "merge-base --is-ancestor" || return 1
+}
+
+test_merge_target_uses_environment_then_repo_then_main() {
+  local repo_path
+  repo_path="$(setup_repo "merge-target-precedence")"
+  local remote_path="$TEST_TMP_ROOT/merge-target-precedence.git"
+
+  git init --bare "$remote_path" >/dev/null
+  git -C "$repo_path" remote add origin "$remote_path"
+  git -C "$repo_path" push -u origin main >/dev/null
+
+  git -C "$repo_path" checkout -b staging >/dev/null
+  echo "staging" > "$repo_path/staging.txt"
+  git -C "$repo_path" add staging.txt
+  git -C "$repo_path" commit -m "advance staging" >/dev/null
+  git -C "$repo_path" push -u origin staging >/dev/null
+  git -C "$repo_path" branch cwb/merged-into-staging
+  git -C "$repo_path" checkout main >/dev/null
+
+  printf '  staging  \n' > "$repo_path/.cwb/merge-target"
+
+  run_cwb_with_env "$repo_path" "CWB_MERGE_TARGET_BRANCH=main" environment-override >/dev/null
+  if ! git -C "$repo_path" show-ref --verify --quiet refs/heads/cwb/merged-into-staging; then
+    fail "Expected the environment merge target to override repository configuration"
+    return 1
+  fi
+
+  run_cwb "$repo_path" repository-target >/dev/null
+  if git -C "$repo_path" show-ref --verify --quiet refs/heads/cwb/merged-into-staging; then
+    fail "Expected the repository merge target to prune branches merged into staging"
+    return 1
+  fi
+
+  git -C "$repo_path" branch cwb/default-target main
+  printf 'not valid..branch\n' > "$repo_path/.cwb/merge-target"
+  local output
+  output="$(run_cwb "$repo_path" invalid-repo-target 2>&1)"
+  if git -C "$repo_path" show-ref --verify --quiet refs/heads/cwb/default-target; then
+    fail "Expected an invalid repository target to fall back to main"
+    return 1
+  fi
+  [[ "$output" == *"Ignoring invalid merge target"* ]] || fail "Expected an invalid merge target warning" || return 1
+}
+
+test_pruning_keeps_dirty_merged_worktree() {
+  local repo_path
+  repo_path="$(setup_repo "dirty-merged-worktree")"
+  local remote_path="$TEST_TMP_ROOT/dirty-merged-worktree.git"
+
+  git init --bare "$remote_path" >/dev/null
+  git -C "$repo_path" remote add origin "$remote_path"
+  git -C "$repo_path" push -u origin main >/dev/null
+  git -C "$repo_path" branch cwb/dirty-merged
+  git -C "$repo_path" branch cwb/dirty-custom
+
+  local dirty_worktree="$repo_path/.cwb/worktrees/dirty-merged"
+  local custom_worktree="$repo_path/custom/dirty-custom"
+  git -C "$repo_path" worktree add "$dirty_worktree" cwb/dirty-merged >/dev/null
+  git -C "$repo_path" worktree add "$custom_worktree" cwb/dirty-custom >/dev/null
+  echo "uncommitted" > "$dirty_worktree/local-change.txt"
+  echo "uncommitted" > "$custom_worktree/local-change.txt"
+
+  local output
+  output="$(run_cwb "$repo_path" keep-dirty --no-tmux 2>&1)"
+
+  assert_file_exists "$dirty_worktree/.git" || return 1
+  assert_file_exists "$dirty_worktree/local-change.txt" || return 1
+  assert_file_exists "$custom_worktree/.git" || return 1
+  assert_file_exists "$custom_worktree/local-change.txt" || return 1
+  if ! git -C "$repo_path" show-ref --verify --quiet refs/heads/cwb/dirty-merged; then
+    fail "Expected the merged branch with a dirty worktree to be preserved"
+    return 1
+  fi
+  if ! git -C "$repo_path" show-ref --verify --quiet refs/heads/cwb/dirty-custom; then
+    fail "Expected a merged branch with a custom dirty worktree to be preserved"
+    return 1
+  fi
+  [[ "$output" == *"Skipping cwb/dirty-merged — worktree has uncommitted changes"* ]] || \
+    fail "Expected dirty-worktree pruning message" || return 1
+  [[ "$output" == *"Skipping cwb/dirty-custom — worktree has uncommitted changes"* ]] || \
+    fail "Expected custom dirty-worktree pruning message" || return 1
 }
 
 test_background_refresh_enables_pruning_on_next_launch() {
@@ -896,6 +986,49 @@ COMPOSE
   assert_not_contains "$repo_path/.cwb/worktrees/ios/state-caching/web/.env" "COMPOSE_PROJECT_NAME=cwb-ios/state-caching" || return 1
 }
 
+test_env_discovery_prunes_worktrees_and_dependency_directories() {
+  local repo_path
+  repo_path="$(setup_repo "env-discovery-pruning")"
+  local worktree_path="$TEST_TMP_ROOT/env-discovery-pruning-worktree"
+  local real_find
+  real_find="$(command -v find)"
+
+  mkdir -p \
+    "$repo_path/app" \
+    "$repo_path/.cwb/worktrees/nested" \
+    "$repo_path/.claude/worktrees/nested" \
+    "$repo_path/node_modules/dependency" \
+    "$repo_path/.venv/dependency" \
+    "$repo_path/.git/nested" \
+    "$worktree_path"
+  echo "APP_ENV=1" > "$repo_path/app/.env"
+  echo "NESTED_CWB=1" > "$repo_path/.cwb/worktrees/nested/.env"
+  echo "NESTED_CLAUDE=1" > "$repo_path/.claude/worktrees/nested/.env"
+  echo "DEPENDENCY=1" > "$repo_path/node_modules/dependency/.env"
+  echo "VENV=1" > "$repo_path/.venv/dependency/.env"
+  echo "GIT_INTERNAL=1" > "$repo_path/.git/nested/.env"
+
+  cat > "$repo_path/bin/find" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+echo "find|\$*" >> "\${CWB_TEST_LOG:?missing CWB_TEST_LOG}"
+exec "$real_find" "\$@"
+EOF
+  chmod +x "$repo_path/bin/find"
+
+  run_env_setup "$repo_path" "$worktree_path" "env-discovery-pruning" "false" >/dev/null
+
+  assert_symlink_target "$worktree_path/app/.env" "$repo_path/app/.env" || return 1
+  assert_file_not_exists "$worktree_path/.cwb/worktrees/nested/.env" || return 1
+  assert_file_not_exists "$worktree_path/.claude/worktrees/nested/.env" || return 1
+  assert_file_not_exists "$worktree_path/node_modules/dependency/.env" || return 1
+  assert_file_not_exists "$worktree_path/.venv/dependency/.env" || return 1
+  assert_file_not_exists "$worktree_path/.git/nested/.env" || return 1
+  assert_contains "$repo_path/.test-cli-calls" "-prune" || return 1
+  assert_contains "$repo_path/.test-cli-calls" "$repo_path/.cwb/worktrees" || return 1
+  assert_contains "$repo_path/.test-cli-calls" "$repo_path/.claude/worktrees" || return 1
+}
+
 test_env_setup_generates_worktree_port_overrides() {
   local repo_path
   repo_path="$(setup_repo "worktree-port-overrides")"
@@ -1008,6 +1141,8 @@ test_yolo_maps_to_agent_flag() {
 
 run_test test_new_branch_creates_worktree_and_runs_cleanup
 run_test test_startup_prunes_cached_merges_without_waiting_for_refresh
+run_test test_merge_target_uses_environment_then_repo_then_main
+run_test test_pruning_keeps_dirty_merged_worktree
 run_test test_background_refresh_enables_pruning_on_next_launch
 run_test test_existing_local_branch_skips_cleanup
 run_test test_remote_only_branch_creates_tracking_worktree
@@ -1036,6 +1171,7 @@ run_test test_zsh_source_wrapper_loads_help_helpers
 run_test test_zshrc_source_uses_sourced_file_dir
 run_test test_new_flag_creates_random_worktree_non_interactively
 run_test test_env_setup_sanitizes_nested_worktree_name_for_compose
+run_test test_env_discovery_prunes_worktrees_and_dependency_directories
 run_test test_env_setup_generates_worktree_port_overrides
 run_test test_set_default_agent_persists_and_launches_agent
 run_test test_yolo_maps_to_agent_flag

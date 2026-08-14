@@ -70,6 +70,23 @@ When using Codex CLI, `cwb` automatically loads project context from `.codex/con
 - Cached web search for faster responses
 - Project documentation fallback to load both `AGENTS.md` and `CLAUDE.md`
 
+### Merge target
+
+By default, cwb prunes `cwb/*` branches that are merged into the locally cached
+`origin/main`. Repositories that merge through a different branch can commit its
+name to `.cwb/merge-target` (ignore `.cwb/worktrees/`, not the entire `.cwb/`
+directory):
+
+```text
+staging
+```
+
+`CWB_MERGE_TARGET_BRANCH` overrides the repository file for one invocation or
+shell environment. The precedence is `CWB_MERGE_TARGET_BRANCH`, then
+`.cwb/merge-target`, then `main`. Empty or invalid branch names are ignored.
+Pruning never removes a worktree with an active cwb session or uncommitted
+changes.
+
 ## Usage
 
 ```bash
@@ -121,7 +138,7 @@ The wrapper is evaluated as shell immediately before the selected agent, so `dop
 
 ## What it does
 
-1. **Prunes merged branches** — removes `cwb/*` branches merged into the locally available `origin/main`, then refreshes that remote-tracking branch in the background for the next launch.
+1. **Prunes merged branches** — removes clean, inactive `cwb/*` branches merged into the locally available merge target, then refreshes that remote-tracking branch in the background for the next launch. The target follows the configuration precedence described above.
 2. **Resolves branch/worktree target**:
    - if a worktree already exists for `cwb/<name>`, reuse it.
    - if local `cwb/<name>` exists, create a worktree from that branch.
@@ -176,7 +193,7 @@ This ensures parallel worktrees never share databases or state. Pass `--copy-vol
 
 - **Active worktree with changes:** kept after the CLI exits. Resume with `cd .cwb/worktrees/<name>`.
 - **Clean worktree (no changes):** automatically removed along with its branch.
-- **Merged into main:** pruned automatically the next time any `cwb` command runs.
+- **Merged into the configured merge target:** pruned automatically the next time any `cwb` command runs, unless the worktree is dirty or has an active session.
 
 ### Post-setup hook
 
