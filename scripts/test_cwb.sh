@@ -75,6 +75,33 @@ assert_symlink_target() {
   fi
 }
 
+wait_for_file() {
+  local path="$1"
+  local attempt
+
+  for attempt in {1..100}; do
+    [[ -e "$path" ]] && return 0
+    sleep 0.02
+  done
+
+  return 1
+}
+
+wait_for_pattern() {
+  local path="$1"
+  local pattern="$2"
+  local attempt
+
+  for attempt in {1..100}; do
+    if [[ -f "$path" ]] && grep -F -- "$pattern" "$path" >/dev/null; then
+      return 0
+    fi
+    sleep 0.02
+  done
+
+  return 1
+}
+
 setup_repo() {
   local repo_name="$1"
   local repo_path="$TEST_TMP_ROOT/$repo_name"
@@ -277,6 +304,25 @@ DOPPLER_BIN
   chmod +x "$repo_path/bin/doppler"
 }
 
+configure_gated_upload_pack() {
+  local repo_path="$1"
+  local real_git_upload_pack
+  real_git_upload_pack="$(command -v git-upload-pack)"
+
+  cat > "$repo_path/bin/gated-git-upload-pack" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+touch "\${CWB_TEST_LOG:?missing CWB_TEST_LOG}.fetch-started"
+while [[ ! -e "\${CWB_TEST_LOG}.fetch-release" ]]; do
+  sleep 0.02
+done
+exec "$real_git_upload_pack" "\$@"
+EOF
+  chmod +x "$repo_path/bin/gated-git-upload-pack"
+  git -C "$repo_path" config remote.origin.uploadpack "$repo_path/bin/gated-git-upload-pack"
+}
+
 run_env_setup() {
   local repo_path="$1"
   local worktree_path="$2"
@@ -310,6 +356,86 @@ test_new_branch_creates_worktree_and_runs_cleanup() {
   assert_contains "$repo_path/.test-cli-calls" "claude|" || return 1
   assert_contains "$repo_path/.test-cli-calls" "/.cwb/worktrees/alpha|" || return 1
   assert_contains "$repo_path/.test-cleanup-calls" "cwb/alpha" || return 1
+}
+
+test_startup_prunes_cached_merges_without_waiting_for_refresh() {
+  local repo_path
+  repo_path="$(setup_repo "async-cached-pruning")"
+  local remote_path="$TEST_TMP_ROOT/async-cached-pruning.git"
+
+  git init --bare "$remote_path" >/dev/null
+  git -C "$repo_path" remote add origin "$remote_path"
+  git -C "$repo_path" push -u origin main >/dev/null
+  git -C "$repo_path" branch cwb/already-merged
+  configure_gated_upload_pack "$repo_path"
+
+  run_cwb "$repo_path" alpha --no-tmux >/dev/null &
+  local cwb_pid=$!
+  local launched_before_refresh=false
+  local refresh_started=false
+  if wait_for_file "$repo_path/.test-cli-calls.fetch-started"; then
+    refresh_started=true
+  fi
+  if $refresh_started && wait_for_pattern "$repo_path/.test-cli-calls" "claude|"; then
+    launched_before_refresh=true
+  fi
+
+  touch "$repo_path/.test-cli-calls.fetch-release"
+  wait "$cwb_pid"
+
+  if ! $refresh_started || ! $launched_before_refresh; then
+    fail "Expected the agent to launch before the background fetch was released"
+    return 1
+  fi
+  if git -C "$repo_path" show-ref --verify --quiet refs/heads/cwb/already-merged; then
+    fail "Expected the cached merged branch to be pruned"
+    return 1
+  fi
+}
+
+test_background_refresh_enables_pruning_on_next_launch() {
+  local repo_path
+  repo_path="$(setup_repo "async-future-pruning")"
+  local remote_path="$TEST_TMP_ROOT/async-future-pruning.git"
+
+  git init --bare "$remote_path" >/dev/null
+  git -C "$repo_path" remote add origin "$remote_path"
+  git -C "$repo_path" push -u origin main >/dev/null
+
+  git -C "$repo_path" checkout -b cwb/merged-remotely >/dev/null
+  echo "merged remotely" > "$repo_path/feature.txt"
+  git -C "$repo_path" add feature.txt
+  git -C "$repo_path" commit -m "add remotely merged branch" >/dev/null
+  local merged_commit
+  merged_commit="$(git -C "$repo_path" rev-parse HEAD)"
+  git -C "$repo_path" push origin cwb/merged-remotely >/dev/null
+  git -C "$repo_path" checkout main >/dev/null
+  git --git-dir="$remote_path" update-ref refs/heads/main "$merged_commit"
+
+  run_cwb "$repo_path" first-refresh --no-tmux >/dev/null
+
+  local attempt
+  for attempt in {1..100}; do
+    if [[ "$(git -C "$repo_path" rev-parse origin/main)" == "$merged_commit" ]]; then
+      break
+    fi
+    sleep 0.02
+  done
+  if [[ "$(git -C "$repo_path" rev-parse origin/main)" != "$merged_commit" ]]; then
+    fail "Expected the background fetch to refresh origin/main"
+    return 1
+  fi
+  if ! git -C "$repo_path" show-ref --verify --quiet refs/heads/cwb/merged-remotely; then
+    fail "Expected the remotely merged branch to remain until the next pruning pass"
+    return 1
+  fi
+
+  run_cwb "$repo_path" second-refresh --no-tmux >/dev/null
+
+  if git -C "$repo_path" show-ref --verify --quiet refs/heads/cwb/merged-remotely; then
+    fail "Expected the refreshed merge state to prune the branch on the next launch"
+    return 1
+  fi
 }
 
 test_existing_local_branch_skips_cleanup() {
@@ -881,6 +1007,8 @@ test_yolo_maps_to_agent_flag() {
 }
 
 run_test test_new_branch_creates_worktree_and_runs_cleanup
+run_test test_startup_prunes_cached_merges_without_waiting_for_refresh
+run_test test_background_refresh_enables_pruning_on_next_launch
 run_test test_existing_local_branch_skips_cleanup
 run_test test_remote_only_branch_creates_tracking_worktree
 run_test test_existing_worktree_is_reused_even_if_not_default_path

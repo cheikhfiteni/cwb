@@ -79,17 +79,24 @@ _cwb_session_alive() {
   esac
 }
 
-_cwb_prune_merged() {
-  local repo_root
-  repo_root="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)" || return 1
+_cwb_refresh_merge_target_async() {
+  local repo_root="$1"
+  local merge_target="$2"
 
-  # Determine the merge target branch. Defaults to main; override via env var.
-  local merge_target="${CWB_MERGE_TARGET_BRANCH:-main}"
+  # Run the network refresh in a detached subshell so sourced and executable
+  # installs both return to worktree startup without waiting for the fetch.
+  (
+    cd "$repo_root" || exit
+    GIT_TERMINAL_PROMPT=0 git fetch origin "$merge_target" --quiet </dev/null >/dev/null 2>&1 &
+  )
+}
 
-  # Fetch the merge target to check for merged branches (suppress output to avoid noise)
-  git fetch origin "$merge_target" --quiet 2>/dev/null || return 0
+_cwb_prune_known_merged() {
+  local repo_root="$1"
+  local merge_target="$2"
 
-  # Find and clean up cwb branches that have been merged into the merge target
+  git show-ref --verify --quiet "refs/remotes/origin/$merge_target" || return 0
+
   local branch wt_name wt_path legacy_path
   for branch in $(git for-each-ref --format='%(refname:short)' refs/heads/cwb/ 2>/dev/null); do
     if git merge-base --is-ancestor "$branch" "origin/$merge_target" 2>/dev/null; then
@@ -119,6 +126,19 @@ _cwb_prune_merged() {
       git branch -D "$branch" 2>/dev/null
     fi
   done
+}
+
+_cwb_prune_merged() {
+  local repo_root
+  repo_root="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)" || return 1
+
+  # Determine the merge target branch. Defaults to main; override via env var.
+  local merge_target="${CWB_MERGE_TARGET_BRANCH:-main}"
+
+  # Prune from local knowledge, then refresh in the background so the next
+  # launch observes newer merges without network latency on time-to-agent.
+  _cwb_prune_known_merged "$repo_root" "$merge_target"
+  _cwb_refresh_merge_target_async "$repo_root" "$merge_target"
 }
 
 _cwb_generate_name() {
